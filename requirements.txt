@@ -11,8 +11,8 @@ PyJWT==2.9.0
 boto3==1.26.23
 django-storages==1.13.1
 django-health-check==3.18.1
-django-rest-auth==0.9.5
-django-allauth==0.43.0
+dj-rest-auth==5.0.2
+django-allauth==0.63.6
 pillow==10.4.0
 tzdata==2025.2
 environ
