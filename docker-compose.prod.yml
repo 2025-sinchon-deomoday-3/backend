@@ -1,7 +1,7 @@
-sversion: '3'
+version: '3'
 services:
 
-	# Django 웹 애플리케이션을 실행
+  # Django 웹 애플리케이션을 실행
   web:
     container_name: web
     build:
@@ -23,7 +23,7 @@ services:
       - sh
       - config/docker/entrypoint.prod.sh 
 
-	# Nginx를 사용하여 웹 서버를 설정, Django 애플리케이션에 대한 요청을 처리
+  # Nginx를 사용하여 웹 서버를 설정, Django 애플리케이션에 대한 요청을 처리
   nginx:
     container_name: nginx
     # ./config/nginx의 Dockerfile을 사용해 Nginx 이미지를 빌드
