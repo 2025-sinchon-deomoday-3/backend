@@ -1,0 +1,49 @@
+version: '3'
+services:
+
+  db:
+    container_name: db
+    image: mysql:8.0
+    restart: always
+    command: ["--default-authentication-plugin=mysql_native_password"]
+    environment:
+      MYSQL_ROOT_HOST: '%'
+      MYSQL_ROOT_PASSWORD: mysql
+    expose:
+      - 3306
+    ports:
+      - "3307:3306"
+    env_file:
+      - .env
+    volumes:
+      - dbdata:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "db", "-u", "root", "-pmysql"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 20s
+
+  web:
+    container_name: web
+    build: .
+    command: sh -c "python manage.py migrate --settings=dongleDongle.settings.dev && python manage.py runserver 0.0.0.0:8000  --settings=dongleDongle.settings.dev"
+    environment:
+      MYSQL_ROOT_PASSWORD: mysql
+      DATABASE_NAME: mysql
+      DATABASE_USER: 'root'
+      DATABASE_PASSWORD: mysql
+      DATABASE_PORT: 3306
+      DATABASE_HOST: db
+      DJANGO_SETTINGS_MODULE: dongleDongle.settings.dev
+    restart: always
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app
+    depends_on:
+      db:
+        condition: service_healthy
+volumes:
+  app:
+  dbdata:
