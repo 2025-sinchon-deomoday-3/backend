@@ -1,0 +1,110 @@
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import permissions
+from .serializers import *
+from django.conf import settings
+from rest_framework import status
+from rest_framework_simplejwt.serializers import TokenRefreshSerializer
+from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
+from rest_framework_simplejwt.views import TokenRefreshView
+
+
+class SignUpView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        serializer = SignUpSerializer(data=request.data)
+    
+        if serializer.is_valid():
+            user = serializer.save()
+            response_data = UserReadSerializer(user).data
+            return Response({'message':'성공적으로 회원가입되었습니다.', 'data':response_data})
+        return Response({'message':'회원가입에 실패하였습니다.', 'error':serializer.errors})
+
+
+class LoginView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    serializer_class = UserLoginSerializer
+    def post(self, request):
+        serializer = UserLoginSerializer(data=request.data)
+
+        if serializer.is_valid():
+            data = serializer.validated_data
+            remember = bool(request.data.get("remember", False))
+
+            resp = Response({"message": "성공적으로 로그인되었습니다.", "data": {
+                "id": data["id"],
+                "username": data["username"],
+                "access_token": data["access_token"],
+            }})
+
+            refresh_token = data["refresh_token"]
+            max_age = 14 * 24 * 60 * 60 if remember else None
+            resp.set_cookie(
+                key="refresh_token",
+                value=refresh_token,
+                max_age=max_age,
+                httponly=True,
+                samesite="Lax",
+                secure=not settings.DEBUG,
+                path="/",
+            )
+            return resp
+        return Response({'message':'로그인에 실패하였습니다.', 'error':serializer.errors})
+
+
+class CookieTokenRefreshView(TokenRefreshView):
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request, *args, **kwargs):
+        refresh_from_cookie = request.COOKIES.get("refresh_token")
+        refresh_in_body = request.data.get("refresh")
+
+        payload = {"refresh": refresh_in_body or refresh_from_cookie}
+        if not payload["refresh"]:
+            return Response({"detail": "No refresh token."}, status=status.HTTP_400_BAD_REQUEST)
+
+        serializer = TokenRefreshSerializer(data=payload)
+        try:
+            serializer.is_valid(raise_exception=True)
+        except TokenError as e:
+            raise InvalidToken(e.args[0])
+
+        data = {"access_token": serializer.validated_data["access"]}
+
+        new_refresh = serializer.validated_data.get("refresh")
+        resp = Response(data, status=status.HTTP_200_OK)
+
+        if new_refresh:
+            old = request.COOKIES.get("refresh_token")
+            is_session_cookie = "Max-Age" not in (request.headers.get("Cookie", ""))
+            max_age = None if is_session_cookie else 14 * 24 * 60 * 60
+
+            resp.set_cookie(
+                key="refresh_token",
+                value=new_refresh,
+                max_age=max_age,
+                httponly=True,
+                samesite="Lax",
+                secure=not settings.DEBUG,
+                path="/",
+            )
+        return resp
+
+
+class LogoutView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        serializer = LogoutSerializer(data={}, context={"request": request})
+        serializer.is_valid(raise_exception=True)
+
+        resp = Response(serializer.validated_data, status=status.HTTP_200_OK)
+        resp.delete_cookie(
+            key="refresh_token",
+            path="/",
+            domain=None,
+            samesite="Lax",
+        )
+        return resp
