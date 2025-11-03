@@ -17,3 +17,5 @@ pillow==10.4.0
 tzdata==2025.2
 environ
 pymysql==1.1.0
+requests>=2.31.0
+schedule>=1.2.0

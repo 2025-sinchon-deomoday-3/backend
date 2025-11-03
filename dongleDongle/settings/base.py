@@ -54,6 +54,7 @@ INSTALLED_APPS = [
 
     # 앱 추가하기
     'accounts',
+    'ledgers',
 ]
 
 SITE_ID = 1
