@@ -12,7 +12,8 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__fil
 env = environ.Env(
     DEBUG=(bool, False)
 )
-environ.Env.read_env("/Users/hwang-gyuri/backend/.env")
+
+environ.Env.read_env(os.path.join(BASE_DIR, '.env'))
 
 AUTH_USER_MODEL = 'accounts.User'
 
@@ -54,7 +55,11 @@ INSTALLED_APPS = [
 
     # 앱 추가하기
     'accounts',
-    'rates'
+    'ledgers',
+    'rates',
+    'budgets',
+    'feeds',
+    'summaries',
 ]
 
 SITE_ID = 1
