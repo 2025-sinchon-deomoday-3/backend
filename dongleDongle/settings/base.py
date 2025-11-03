@@ -14,7 +14,7 @@ env = environ.Env(
 )
 environ.Env.read_env(os.path.join(BASE_DIR, '.env'))
 
-# AUTH_USER_MODEL = 'accounts.User'
+AUTH_USER_MODEL = 'accounts.User'
 
 
 # Quick-start development settings - unsuitable for production
@@ -50,8 +50,10 @@ INSTALLED_APPS = [
     'dj_rest_auth.registration',
 
     'rest_framework_simplejwt',
+    'rest_framework_simplejwt.token_blacklist',
 
     # 앱 추가하기
+    'accounts',
 ]
 
 SITE_ID = 1

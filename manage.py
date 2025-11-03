@@ -6,7 +6,11 @@ import sys
 
 def main():
     """Run administrative tasks."""
+    # 배포할 때는 밑에 걸로 변경
     os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'dongleDongle.settings')
+
+    # 개발할 때는 밑에 걸로 변경
+    # os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'dongleDongle.settings.dev')
     try:
         from django.core.management import execute_from_command_line
     except ImportError as exc:
