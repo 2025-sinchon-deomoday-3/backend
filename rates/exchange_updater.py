@@ -8,7 +8,8 @@ import django
 # DJANGO_SETTINGS_MODULE만 바꿔서 로컬/배포 전환
 #   - 로컬: dongleDongle.settings.dev
 #   - 배포: dongleDongle.settings.prod
-os.environ.setdefault("DJANGO_SETTINGS_MODULE", "dongleDongle.settings.dev")
+# os.environ.setdefault("DJANGO_SETTINGS_MODULE", "dongleDongle.settings.dev")
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "dongleDongle.settings.prod")
 django.setup()
 
 from django.conf import settings
