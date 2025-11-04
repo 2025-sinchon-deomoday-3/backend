@@ -123,12 +123,14 @@ class UniversitySearchView(APIView):
 
     def get(self, request):
         keyword = request.query_params.get("q", "").strip()
-        qs = University.objects.all()
+        queryset = University.objects.all()
 
         if keyword:
-            qs = qs.filter(univ_name__icontains=keyword)
+            queryset = queryset.filter(univ_name__icontains=keyword)
 
-        serializer = UniversityListSerializer(qs.order_by("univ_name"), many=True)
+        queryset = queryset.order_by("univ_name")
+
+        serializer = UniversityListSerializer(queryset, many=True)
         return ok("본교 목록입니다.", serializer.data)
 
 
@@ -140,6 +142,7 @@ class CountryListView(APIView):
             {"code": choice[0], "label": choice[1]}
             for choice in CountryOption.choices
         ]
+        data = sorted(data, key=lambda x: x["label"])
         return ok("파견 국가 목록입니다.", data)
 
 
@@ -154,8 +157,7 @@ class ExchangeUniversitySearchView(APIView):
         if keyword:
             queryset = queryset.filter(univ_name__icontains=keyword)
 
-        serializer = ExchangeUniversityListSerializer(
-            queryset.order_by("univ_name"),
-            many=True,
-        )
+        queryset = queryset.order_by("univ_name")
+
+        serializer = ExchangeUniversityListSerializer(queryset, many=True)
         return ok("파견 대학 목록입니다.", serializer.data)
