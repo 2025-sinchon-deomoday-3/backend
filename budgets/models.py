@@ -45,14 +45,14 @@ class BaseBudget(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
 #예산안 내 생활비 
-class LivingBudget(models.Model):
-    budget = models.ForeignKey(Budget, on_delete=models.CASCADE, related_name="생할비 예산")
-    total_amount = models.IntegerField(max_length=3000, null=False)
-    food
-    transport
-    housing
-    shopping
-    culture
+# class LivingBudget(models.Model):
+#     budget = models.ForeignKey(Budget, on_delete=models.CASCADE, related_name="생할비 예산")
+#     total_amount = models.IntegerField(max_length=3000, null=False)
+#     foodgit 
+#     transport
+#     housing
+#     shopping
+#     culture
     
 
     
