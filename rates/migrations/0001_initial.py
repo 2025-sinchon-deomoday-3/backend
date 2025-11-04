@@ -16,13 +16,9 @@ class Migration(migrations.Migration):
             fields=[
                 ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
                 ('base_currency', models.CharField(blank=True, max_length=10)),
-                ('target_currency', models.CharField(blank=True, max_length=10)),
+                ('target_currency', models.CharField(choices=[('KRW', '대한민국 원 (KRW)'), ('USD', '미국 달러 (USD)'), ('JPY', '일본 엔 (JPY)'), ('EUR', '유럽 유로 (EUR)'), ('CNY', '중국 위안 (CNY)'), ('TWD', '대만 달러 (TWD)'), ('GBP', '영국 파운드 (GBP)'), ('CAD', '캐나다 달러 (CAD)')], max_length=10, unique=True)),
                 ('rate', models.DecimalField(decimal_places=6, max_digits=10)),
-                ('effective_at', models.DateTimeField(blank=True, null=True)),
-                ('created_at', models.DateTimeField(auto_now_add=True)),
+                ('updated_at', models.DateTimeField(auto_now=True)),
             ],
-            options={
-                'unique_together': {('base_currency', 'target_currency', 'effective_at')},
-            },
         ),
     ]
