@@ -8,6 +8,7 @@ import django
 # DJANGO_SETTINGS_MODULE만 바꿔서 로컬/배포 전환
 #   - 로컬: dongleDongle.settings.dev
 #   - 배포: dongleDongle.settings.prod
+# os.environ.setdefault("DJANGO_SETTINGS_MODULE", "dongleDongle.settings.dev")
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "dongleDongle.settings.prod")
 django.setup()
 
@@ -23,7 +24,7 @@ DB_CONFIG = {
     "host": db.get("HOST") or "localhost",
     "user": db.get("USER") or "root",
     "password": db.get("PASSWORD") or "",
-    "database": db.get("NAME") or "dongle",
+    "database": db.get("NAME") or "dongle_db",
     "charset": "utf8mb4",
     # 필요하면 "port": int(db.get("PORT") or 3306),
 }
