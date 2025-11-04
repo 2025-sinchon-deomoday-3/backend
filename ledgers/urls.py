@@ -10,4 +10,6 @@ urlpatterns = [
     path("fill/<int:ledger_id>/", LedgerEntryDetailView.as_view(), name="ledger_detail"),
     path("fill/<int:ledger_id>", LedgerEntryDetailView.as_view()), # 슬래시 없는 url도 가능하도록
     path("thisMonth/", ThisMonthSummaryView.as_view(), name="this_month_summary"),
+    path("totalMonth/", TotalSummaryView.as_view(), name="total_summary"),
+
 ]
