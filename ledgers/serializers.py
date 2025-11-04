@@ -1,6 +1,17 @@
 from rest_framework import serializers
 from .models import *
+from rates.views import convert_to_krw, convert_from_krw
+from decimal import Decimal
 
+COUNTRY_TO_CURRENCY = {
+    "미국": "USD",
+    "일본": "JPY",
+    "한국": "KRW",
+    "중국": "CNY",
+    "대만": "TWD",
+    "캐나다": "CAD",
+    "영국": "GBP",
+}
 
 class LedgerEntryCreateSerializer(serializers.ModelSerializer):
     date = serializers.DateField(format="%Y-%m-%d", input_formats=["%Y-%m-%d"])
@@ -22,7 +33,6 @@ class LedgerEntryCreateSerializer(serializers.ModelSerializer):
             "amount",
             "currency_code",
         )
-        
         extra_kwargs = {
             "payment_method": {"required": False, "allow_null": True},
         }
@@ -52,10 +62,74 @@ class LedgerEntryCreateSerializer(serializers.ModelSerializer):
 
         return data
 
+    def _convert_amount(self, user, original_amount: Decimal, original_currency: str):
+        # 원화 -> 교환국 통화
+        if original_currency == "KRW":
+            exchange_profile = getattr(user, "exchange_profile", None)
+            if exchange_profile is None:
+                return None, None
+
+            country_name = exchange_profile.exchange_country
+            if not country_name:
+                return None, None
+
+            country_name = country_name.strip()
+
+            target_currency = COUNTRY_TO_CURRENCY.get(country_name)
+            if target_currency is None:
+                return None, None
+
+            if target_currency == "KRW":
+                return None, None
+
+            converted_amount = convert_from_krw(original_amount, target_currency)
+            if converted_amount is None:
+                return None, None
+
+            return converted_amount, target_currency
+
+        # 외화 → KRW
+        converted_amount = convert_to_krw(original_amount, original_currency)
+        if converted_amount is None:
+            return None, None
+
+        return converted_amount, "KRW"
+
+
     def create(self, validated_data):
         user = self.context["request"].user
-        return LedgerEntry.objects.create(user=user, **validated_data)
+        original_amount: Decimal = validated_data["amount"]
+        original_currency: str = validated_data["currency_code"]
 
+        converted_amount, converted_currency = self._convert_amount(
+            user, original_amount, original_currency
+        )
+
+        entry = LedgerEntry.objects.create(
+            user=user,
+            **validated_data,
+            amount_converted=converted_amount,
+            converted_currency_code=converted_currency,
+        )
+        return entry
+
+    def update(self, instance, validated_data):
+        user = self.context["request"].user
+
+        amount = validated_data.get("amount", instance.amount)
+        currency_code = validated_data.get("currency_code", instance.currency_code)
+
+        converted_amount, converted_currency = self._convert_amount(
+            user, amount, currency_code
+        )
+
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+
+        instance.amount_converted = converted_amount
+        instance.converted_currency_code = converted_currency
+        instance.save()
+        return instance
 
 class LedgerEntrySimpleSerializer(serializers.ModelSerializer):
     class Meta:
