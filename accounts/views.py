@@ -7,6 +7,7 @@ from rest_framework import status
 from rest_framework_simplejwt.serializers import TokenRefreshSerializer
 from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
 from rest_framework_simplejwt.views import TokenRefreshView
+from rest_framework.permissions import IsAuthenticated
 
 
 class SignUpView(APIView):
@@ -161,3 +162,31 @@ class ExchangeUniversitySearchView(APIView):
 
         serializer = ExchangeUniversityListSerializer(queryset, many=True)
         return ok("파견 대학 목록입니다.", serializer.data)
+
+
+def ok(message, data=None, status=200):
+    return Response({"message": message, "data": data}, status=status)
+
+
+def bad(message, error=None, status=400):
+    return Response({"message": message, "error": error}, status=status)
+
+
+class MyProfileView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        serializer = MyProfileSerializer(request.user)
+        return ok("조회 완료", serializer.data, status=200)
+
+    def put(self, request):
+        serializer = ExchangeProfileUpdateSerializer(
+            data=request.data,
+            context={"request": request},
+        )
+        if not serializer.is_valid():
+            return bad("유효성 검사 실패", serializer.errors)
+
+        serializer.save()
+        refreshed = MyProfileSerializer(request.user)
+        return ok("파견 정보 수정 완료", refreshed.data)
