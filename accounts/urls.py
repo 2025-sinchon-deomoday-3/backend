@@ -13,4 +13,7 @@ urlpatterns = [
     path("universities/", UniversitySearchView.as_view(), name="university_list"),
     path("countries/", CountryListView.as_view(), name="country_list"),
     path("exchange-universities/", ExchangeUniversitySearchView.as_view(), name="exchange_university_list"),
+
+    # 프로필
+    path("profile/", MyProfileView.as_view(), name="my-profile"),
 ]

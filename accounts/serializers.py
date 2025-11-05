@@ -216,3 +216,99 @@ class ExchangeUniversityListSerializer(serializers.ModelSerializer):
     class Meta:
         model = ExchangeUniversity
         fields = ["id", "univ_name", "country"]
+
+
+class MyProfileSerializer(serializers.Serializer):
+    name = serializers.CharField(source="nickname")
+    gender = serializers.CharField(source="get_gender_display")
+    university = serializers.SerializerMethodField()
+
+    user_id = serializers.CharField(source="username")
+    exchange_country = serializers.SerializerMethodField()
+    exchange_type = serializers.SerializerMethodField()
+    exchange_university = serializers.SerializerMethodField()
+    exchange_semester = serializers.SerializerMethodField()
+    exchange_period = serializers.SerializerMethodField()
+
+    def get_university(self, obj: User):
+        return obj.univ.univ_name if obj.univ else None
+
+    def get_exchange_country(self, obj: User):
+        profile = getattr(obj, "exchange_profile", None)
+        if not profile or not profile.exchange_country:
+            return None
+        for code, label in CountryOption.choices:
+            if profile.exchange_country == code:
+                return label
+        return profile.exchange_country
+
+    def get_exchange_type(self, obj: User):
+        profile = getattr(obj, "exchange_profile", None)
+        if not profile or not profile.exchange_type:
+            return None
+        return profile.get_exchange_type_display()
+
+    def get_exchange_university(self, obj: User):
+        profile = getattr(obj, "exchange_profile", None)
+        if not profile or not profile.exchange_univ:
+            return None
+        return profile.exchange_univ.univ_name
+
+    def get_exchange_semester(self, obj: User):
+        profile = getattr(obj, "exchange_profile", None)
+        return profile.exchange_semester if profile else None
+
+    def get_exchange_period(self, obj: User):
+        profile = getattr(obj, "exchange_profile", None)
+        return profile.exchange_period if profile else None
+
+
+class ExchangeProfileUpdateSerializer(serializers.Serializer):
+    exchange_univ = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    exchange_country = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    exchange_type = serializers.ChoiceField(choices=ExchangeProfile.ExchangeType.choices, required=False, allow_null=True)
+    exchange_semester = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    exchange_period = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+
+    def save(self, **kwargs):
+        user = self.context["request"].user
+        data = self.validated_data
+        profile = self._get_or_create_exchange_profile(user)
+
+        if "exchange_univ" in data:
+            name = data.get("exchange_univ")
+            profile.exchange_univ = (
+                ExchangeUniversity.objects.filter(univ_name=name).first() if name else None
+            )
+
+        if "exchange_country" in data:
+            country_input = data.get("exchange_country")
+            matched_label = self._get_country_label(country_input)
+            profile.exchange_country = matched_label
+
+        if "exchange_type" in data:
+            profile.exchange_type = data.get("exchange_type")
+
+        if "exchange_semester" in data:
+            profile.exchange_semester = data.get("exchange_semester")
+
+        if "exchange_period" in data:
+            profile.exchange_period = data.get("exchange_period")
+
+        profile.save()
+        return profile
+
+    def _get_country_label(self, value):
+        from .models import CountryOption
+        all_labels = [label for _, label in CountryOption.choices]
+        if value in all_labels:
+            return value
+        for code, label in CountryOption.choices:
+            if value == code:
+                return label
+        return value
+
+    def _get_or_create_exchange_profile(self, user):
+        if hasattr(user, "exchange_profile"):
+            return user.exchange_profile
+        return ExchangeProfile.objects.create(user=user)
