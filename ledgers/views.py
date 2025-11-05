@@ -4,6 +4,7 @@ from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from datetime import datetime, date as date_type
 from collections import defaultdict
+from datetime import date
 from django.db.models import QuerySet
 
 from .serializers import *
@@ -206,3 +207,151 @@ class LedgerEntryDetailView(APIView):
 
         entry.delete()
         return Response({"message": "가계부 항목이 삭제되었습니다."}, status=204)
+
+
+class ThisMonthSummaryView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+        today = date.today()
+        month_start = today.replace(day=1)
+        entries = LedgerEntry.objects.filter(
+            user=user,
+            date__gte=month_start,
+            date__lte=today,
+        )
+
+        result = self._calculate_summary(user, entries, today)
+        serializer = ThisMonthSummarySerializer(result)
+        return ok("이번달 수입/지출 합계 조회 성공", serializer.data)
+
+    def _calculate_summary(self, user, entries, today):
+        foreign_currency = self._foreign_currency(user)
+
+        def _sum(entry_type):
+            qs = entries.filter(entry_type=entry_type)
+            total_foreign = Decimal("0.00")
+            total_krw = Decimal("0.00")
+
+            for entry in qs:
+                if entry.currency_code == "KRW":
+                    total_krw += entry.amount
+                    converted = convert_from_krw(entry.amount, foreign_currency)
+                    if converted:
+                        total_foreign += converted
+                    continue
+
+                if entry.currency_code == foreign_currency:
+                    total_foreign += entry.amount
+                    converted = convert_to_krw(entry.amount, foreign_currency)
+                    if converted:
+                        total_krw += converted
+                    continue
+
+                krw = convert_to_krw(entry.amount, entry.currency_code)
+                if krw is None:
+                    continue
+                total_krw += krw
+                foreign = convert_from_krw(krw, foreign_currency)
+                if foreign:
+                    total_foreign += foreign
+
+            total_foreign = total_foreign.quantize(Decimal("0.01"))
+            total_krw = total_krw.quantize(Decimal("0.01"))
+            return total_foreign, total_krw
+
+        income_foreign, income_krw = _sum(LedgerEntry.EntryType.INCOME)
+        expense_foreign, expense_krw = _sum(LedgerEntry.EntryType.EXPENSE)
+
+        return {
+            "month": today.strftime("%Y-%m"),
+            "foreign_currency": foreign_currency,
+            "income_foreign": income_foreign,
+            "income_krw": income_krw,
+            "expense_foreign": expense_foreign,
+            "expense_krw": expense_krw,
+        }
+
+    def _foreign_currency(self, user):
+        exchange_profile = getattr(user, "exchange_profile", None)
+        if not exchange_profile:
+            return "KRW"
+
+        country_name = getattr(exchange_profile, "exchange_country", None)
+        if not country_name:
+            return "KRW"
+
+        name = country_name.strip()
+        return COUNTRY_TO_CURRENCY.get(name, "KRW")
+
+
+class TotalSummaryView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+        entries = LedgerEntry.objects.filter(user=user)
+
+        result = self._calculate_summary(user, entries)
+        serializer = ThisMonthSummarySerializer(result)
+        return ok("전체 수입/지출 합계 조회 성공", serializer.data)
+
+    def _calculate_summary(self, user, entries):
+        foreign_currency = self._foreign_currency(user)
+
+        def _sum(entry_type):
+            qs = entries.filter(entry_type=entry_type)
+            total_foreign = Decimal("0.00")
+            total_krw = Decimal("0.00")
+
+            for entry in qs:
+                if entry.currency_code == "KRW":
+                    total_krw += entry.amount
+                    converted = convert_from_krw(entry.amount, foreign_currency)
+                    if converted:
+                        total_foreign += converted
+                    continue
+
+                if entry.currency_code == foreign_currency:
+                    total_foreign += entry.amount
+                    converted = convert_to_krw(entry.amount, foreign_currency)
+                    if converted:
+                        total_krw += converted
+                    continue
+
+                krw = convert_to_krw(entry.amount, entry.currency_code)
+                if krw is None:
+                    continue
+                total_krw += krw
+                foreign = convert_from_krw(krw, foreign_currency)
+                if foreign:
+                    total_foreign += foreign
+
+            total_foreign = total_foreign.quantize(Decimal("0.01"))
+            total_krw = total_krw.quantize(Decimal("0.01"))
+            return total_foreign, total_krw
+
+        income_foreign, income_krw = _sum(LedgerEntry.EntryType.INCOME)
+        expense_foreign, expense_krw = _sum(LedgerEntry.EntryType.EXPENSE)
+
+        return {
+            "month": "전체 기간",
+            "foreign_currency": foreign_currency,
+            "income_foreign": income_foreign,
+            "income_krw": income_krw,
+            "expense_foreign": expense_foreign,
+            "expense_krw": expense_krw,
+        }
+
+    def _foreign_currency(self, user):
+        exchange_profile = getattr(user, "exchange_profile", None)
+        if not exchange_profile:
+            return "KRW"
+
+        country_name = getattr(exchange_profile, "exchange_country", None)
+        if not country_name:
+            return "KRW"
+
+        name = country_name.strip()
+        return COUNTRY_TO_CURRENCY.get(name, "KRW")

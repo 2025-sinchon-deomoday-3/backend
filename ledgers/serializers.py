@@ -145,3 +145,29 @@ class LedgerEntrySimpleSerializer(serializers.ModelSerializer):
             "amount_converted",
             "converted_currency_code",
         ]
+
+
+class ThisMonthSummarySerializer(serializers.Serializer):
+    month = serializers.CharField()
+    foreign_currency = serializers.CharField()
+    income_foreign = serializers.DecimalField(max_digits=18, decimal_places=2)
+    income_krw = serializers.DecimalField(max_digits=18, decimal_places=2)
+    expense_foreign = serializers.DecimalField(max_digits=18, decimal_places=2)
+    expense_krw = serializers.DecimalField(max_digits=18, decimal_places=2)
+
+    def to_representation(self, instance):
+        return {
+            "month": instance["month"],
+            "expense": {
+                "foreign_amount": instance["expense_foreign"],
+                "foreign_currency": instance["foreign_currency"],
+                "krw_amount": instance["expense_krw"],
+                "krw_currency": "KRW",
+            },
+            "income": {
+                "foreign_amount": instance["income_foreign"],
+                "foreign_currency": instance["foreign_currency"],
+                "krw_amount": instance["income_krw"],
+                "krw_currency": "KRW",
+            },
+        }
