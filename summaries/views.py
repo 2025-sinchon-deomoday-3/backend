@@ -131,6 +131,43 @@ class DetailProfileView(APIView):
         }
         return ok("세부 프로필 수정 및 가계부 요약본 스냅샷 생성 완료", data)
 
+    def _sum_ledger_for_user(self, user, foreign_currency):
+        entries = (
+            LedgerEntry.objects
+            .filter(
+                user=user,
+                entry_type=LedgerEntry.EntryType.EXPENSE,
+                category__in=INCLUDED_CATEGORIES,
+            )
+        )
+
+        total_foreign = Decimal("0")
+        total_krw = Decimal("0")
+
+        for entry in entries:
+            if entry.amount_converted and entry.converted_currency_code == "KRW":
+                krw_at_entry = entry.amount_converted
+            else:
+                if entry.currency_code == "KRW":
+                    krw_at_entry = entry.amount
+                else:
+                    converted = convert_to_krw(entry.amount, entry.currency_code)
+                    if converted is None:
+                        continue
+                    krw_at_entry = converted
+            total_krw += krw_at_entry
+
+            if entry.currency_code == foreign_currency:
+                foreign_at_entry = entry.amount
+            else:
+                foreign_at_entry = convert_from_krw(krw_at_entry, foreign_currency)
+            if foreign_at_entry is not None:
+                total_foreign += foreign_at_entry
+
+        total_foreign = total_foreign.quantize(Decimal("0.01"))
+        total_krw = total_krw.quantize(Decimal("0.01"))
+        return total_foreign, total_krw
+
     def _get_detail_profile_or_none(self, user):
         try:
             return user.summary_detail_profile
@@ -213,3 +250,82 @@ class LedgerSummaryView(APIView):
             }
         )
         return ok("가계부 요약본 조회 성공", serializer.data)
+
+    def _build_category_summaries(self, user, foreign_currency):
+        grouped = {}
+        for code in INCLUDED_CATEGORIES:
+            grouped[code] = {
+                "code": code,
+                "label": self.LABEL_MAP.get(code, code),
+                "foreign_amount": Decimal("0"),
+                "foreign_currency": foreign_currency,
+                "krw_amount": Decimal("0"),
+                "krw_currency": "KRW",
+                "current_rate_krw_amount": Decimal("0"),
+            }
+
+        entries = (
+            LedgerEntry.objects
+            .filter(
+                user=user,
+                entry_type=LedgerEntry.EntryType.EXPENSE,
+                category__in=INCLUDED_CATEGORIES,
+            )
+        )
+
+        total_foreign = Decimal("0")
+        total_krw = Decimal("0")
+        total_current_krw = Decimal("0")
+
+        for entry in entries:
+            item = grouped[entry.category]
+
+            if entry.currency_code == "KRW":
+                current_krw = entry.amount
+            else:
+                current_krw = convert_to_krw(entry.amount, entry.currency_code)
+            if current_krw is not None:
+                item["current_rate_krw_amount"] += current_krw
+                total_current_krw += current_krw
+
+            if entry.amount_converted and entry.converted_currency_code == "KRW":
+                krw_at_entry = entry.amount_converted
+            else:
+                if entry.currency_code == "KRW":
+                    krw_at_entry = entry.amount
+                else:
+                    krw_at_entry = convert_to_krw(entry.amount, entry.currency_code)
+            if krw_at_entry is not None:
+                item["krw_amount"] += krw_at_entry
+                total_krw += krw_at_entry
+
+            if entry.currency_code == foreign_currency:
+                item["foreign_amount"] += entry.amount
+                total_foreign += entry.amount
+            else:
+                if krw_at_entry is not None:
+                    foreign_val = convert_from_krw(krw_at_entry, foreign_currency)
+                    if foreign_val is not None:
+                        item["foreign_amount"] += foreign_val
+                        total_foreign += foreign_val
+
+        result = []
+        for code in INCLUDED_CATEGORIES:
+            item = grouped[code]
+            item["foreign_amount"] = item["foreign_amount"].quantize(Decimal("0.01"))
+            item["krw_amount"] = item["krw_amount"].quantize(Decimal("0.01"))
+            item["current_rate_krw_amount"] = item["current_rate_krw_amount"].quantize(Decimal("0.01"))
+            result.append(item)
+
+        return result, total_foreign, total_krw, total_current_krw
+
+    def _empty_dispatch_cost(self, foreign_currency):
+        return {
+            "tuition": {
+                "foreign_amount": None,
+                "foreign_currency": foreign_currency,
+                "krw_amount": None,
+                "krw_currency": "KRW",
+                "current_rate_krw_amount": None,
+            }
+        }
