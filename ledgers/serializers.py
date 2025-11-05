@@ -15,6 +15,18 @@ COUNTRY_TO_CURRENCY = {
     "이탈리아": "EUR",
     "네덜란드": "EUR",
     "영국": "GBP",
+
+    "USA": "USD",
+    "JAPAN": "JPY",
+    "KOREA": "KRW",
+    "CHINA": "CNY",
+    "TAIWAN": "TWD",
+    "CANADA": "CAD",
+    "UK": "GBP",
+    "FRANCE": "EUR",
+    "GERMANY": "EUR",
+    "NETHERLANDS": "EUR",
+    "ITALY": "EUR",
 }
 
 
