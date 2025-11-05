@@ -1,6 +1,7 @@
 # summaries/models.py
 from django.conf import settings
 from django.db import models
+from decimal import Decimal
 
 
 class DetailProfile(models.Model):
@@ -21,6 +22,8 @@ class DetailProfile(models.Model):
     residence_type = models.CharField(max_length=100, blank=True, help_text="거주유형 직접 입력")
     commute = models.BooleanField(default=False, help_text="통학여부(통학하면 True)")
 
+    summary_note = models.TextField(blank=True)
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -30,51 +33,34 @@ class DetailProfile(models.Model):
 
 class SummarySnapshot(models.Model):
     """
-    기록 시점 환율 고정
-    한달평균생활비, 기본파견비용)도 여기 저장.
+    가계부 요약본 -> 가계부 요약 게시했을 때
+    그 시점의 환산 결과(한달 평균 생활비) 저장!! 현재 환율도 보여줘야하므로
+    그 시점의 프로필/파견정보/한마디 저장
     """
-    CURRENCY_USD = "USD"
-    CURRENCY_KRW = "KRW"
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="snapshots_user")
+    exchange_profile = models.ForeignKey("accounts.ExchangeProfile", on_delete=models.SET_NULL, null=True, blank=True, related_name="snapshots_exchange_profile")
+    detail_profile = models.ForeignKey(DetailProfile, on_delete=models.SET_NULL, null=True, blank=True, related_name="snapshots_detail_profile")
 
-    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="summary_snapshots")
-    exchange_profile = models.ForeignKey("accounts.ExchangeProfile", on_delete=models.SET_NULL, null=True, blank=True, related_name="summary_snapshots")
-    detail_profile = models.ForeignKey(DetailProfile, on_delete=models.SET_NULL, null=True, blank=True, related_name="summary_snapshots")
+    # 프로필 부분
+    snapshot_nickname = models.CharField(max_length=50, blank=True)
+    snapshot_gender = models.CharField(max_length=20, blank=True)
+    snapshot_exchange_country = models.CharField(max_length=50, blank=True)
+    snapshot_exchange_university = models.CharField(max_length=120, blank=True)
+    snapshot_exchange_type = models.CharField(max_length=20, blank=True)
+    snapshot_exchange_semester = models.CharField(max_length=40, blank=True)
+    snapshot_exchange_period = models.CharField(max_length=40, blank=True)
+
+    # 한 달 평균 생활비 부분
+    living_expense_foreign_amount = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal("0.00"))
+    living_expense_foreign_currency = models.CharField(max_length=5, blank=True, help_text="교환국 통화 코드 (USD, JPY ...)")
+    living_expense_krw_amount = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal("0.00"))
+    living_expense_krw_currency = models.CharField(max_length=3, default="KRW")
+
+    # 기본 파견비용 부분
+    base_dispatch_foreign_amount = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
+    base_dispatch_krw_amount = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
-        return f"{self.user} 요약본"
-
-
-# class LivingCostItem(models.Model):
-#     """
-#     한달평균생활비
-#     가계부에서 가져오기 -> 근데 평균을 곁들인...
-#     현재 환율 기준으로도 보여줘야 함
-#     """
-
-#     snapshot = models.ForeignKey(
-#         SummarySnapshot,
-#         on_delete=models.CASCADE,
-#         related_name="living_cost_items",
-#     )
-
-#     # 현재 환율 기준
-#     applied_rate = models.DecimalField(max_digits=12, decimal_places=4, help_text="이 항목 계산에 실제로 쓴 환율")
-
-
-# class DispatchCostItem(models.Model):
-#     """
-#     기본파견비용
-#     예산안에서 불러오기
-#     현재 환율 기준으로도 보여줘야 함
-#     """
-#     snapshot = models.ForeignKey(SummarySnapshot, on_delete=models.CASCADE, related_name="dispatch_cost_items")
-
-
-class SummaryNote(models.Model):
-    snapshot = models.OneToOneField(SummarySnapshot, on_delete=models.CASCADE, related_name="note")
-    content = models.TextField(blank=True)
-
-    def __str__(self):
-        return f"남긴 한 마디 {self.snapshot_id}"
+        return f"{self.user} 가계부 요약본 ({self.created_at.date()})"
