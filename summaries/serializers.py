@@ -1,9 +1,7 @@
-# summaries/serializers.py
 from rest_framework import serializers
 from .models import DetailProfile
 
 
-# 가계부 요약본 세부 프로필 등록
 class DetailProfileSerializer(serializers.ModelSerializer):
     class Meta:
         model = DetailProfile
@@ -19,6 +17,7 @@ class DetailProfileSerializer(serializers.ModelSerializer):
             "culture_per_month",
             "residence_type",
             "commute",
+            "summary_note",
             "created_at",
             "updated_at",
         ]
@@ -30,3 +29,51 @@ class DetailProfileSerializer(serializers.ModelSerializer):
         if value < 0:
             raise serializers.ValidationError("월 지출은 0 이상이어야 합니다.")
         return value
+
+
+class LedgerCategorySummarySerializer(serializers.Serializer):
+    code = serializers.CharField()
+    label = serializers.CharField()
+    foreign_amount = serializers.DecimalField(max_digits=14, decimal_places=2)
+    foreign_currency = serializers.CharField()
+    krw_amount = serializers.DecimalField(max_digits=14, decimal_places=2)
+    krw_currency = serializers.CharField()
+    # 현재 환율 기준 원화... <- 항상 다르게
+    current_rate_krw_amount = serializers.DecimalField(max_digits=14, decimal_places=2)
+
+
+class AverageMonthlyExpenseSerializer(serializers.Serializer):
+    foreign_amount = serializers.DecimalField(max_digits=14, decimal_places=2)
+    foreign_currency = serializers.CharField()
+    krw_amount = serializers.DecimalField(max_digits=14, decimal_places=2)
+    krw_currency = serializers.CharField()
+    current_rate_krw_amount = serializers.DecimalField(max_digits=14, decimal_places=2)
+
+
+class BaseDispatchCostItemSerializer(serializers.Serializer):
+    foreign_amount = serializers.DecimalField(
+        max_digits=14,
+        decimal_places=2,
+        required=False,
+        allow_null=True,
+    )
+    foreign_currency = serializers.CharField(required=False, allow_null=True)
+    krw_amount = serializers.DecimalField(
+        max_digits=14,
+        decimal_places=2,
+        required=False,
+        allow_null=True,
+    )
+    krw_currency = serializers.CharField()
+    current_rate_krw_amount = serializers.DecimalField(
+        max_digits=14,
+        decimal_places=2,
+        required=False,
+        allow_null=True,
+    )
+
+
+class LedgerSummarySerializer(serializers.Serializer):
+    average_monthly_living_expense = AverageMonthlyExpenseSerializer()
+    categories = LedgerCategorySummarySerializer(many=True)
+    base_dispatch_cost = serializers.DictField(child=BaseDispatchCostItemSerializer())
