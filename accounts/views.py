@@ -108,3 +108,56 @@ class LogoutView(APIView):
             samesite="Lax",
         )
         return resp
+
+
+def ok(message, data=None, status_code=status.HTTP_200_OK):
+    return Response({"message": message, "data": data}, status=status_code)
+
+
+def bad(message, error=None, status_code=status.HTTP_400_BAD_REQUEST):
+    return Response({"message": message, "error": error}, status=status_code)
+
+
+class UniversitySearchView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request):
+        keyword = request.query_params.get("q", "").strip()
+        queryset = University.objects.all()
+
+        if keyword:
+            queryset = queryset.filter(univ_name__icontains=keyword)
+
+        queryset = queryset.order_by("univ_name")
+
+        serializer = UniversityListSerializer(queryset, many=True)
+        return ok("본교 목록입니다.", serializer.data)
+
+
+class CountryListView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request):
+        data = [
+            {"code": choice[0], "label": choice[1]}
+            for choice in CountryOption.choices
+        ]
+        data = sorted(data, key=lambda x: x["label"])
+        return ok("파견 국가 목록입니다.", data)
+
+
+class ExchangeUniversitySearchView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request):
+        keyword = request.query_params.get("q", "").strip()
+
+        queryset = ExchangeUniversity.objects.all()
+
+        if keyword:
+            queryset = queryset.filter(univ_name__icontains=keyword)
+
+        queryset = queryset.order_by("univ_name")
+
+        serializer = ExchangeUniversityListSerializer(queryset, many=True)
+        return ok("파견 대학 목록입니다.", serializer.data)

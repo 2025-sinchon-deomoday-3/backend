@@ -8,4 +8,9 @@ urlpatterns = [
     path('login/', LoginView.as_view(), name='login'),
     path('logout/', LogoutView.as_view(), name='logout'),
     path("token/refresh/", CookieTokenRefreshView.as_view(), name="token_refresh"),
+
+    # 회원가입 시 본교, 파견국가, 파견학교 검색
+    path("universities/", UniversitySearchView.as_view(), name="university_list"),
+    path("countries/", CountryListView.as_view(), name="country_list"),
+    path("exchange-universities/", ExchangeUniversitySearchView.as_view(), name="exchange_university_list"),
 ]
