@@ -4,14 +4,31 @@ from rates.views import convert_to_krw, convert_from_krw
 from decimal import Decimal
 
 COUNTRY_TO_CURRENCY = {
+    "한국": "KRW",
     "미국": "USD",
     "일본": "JPY",
-    "한국": "KRW",
+    "독일": "EUR",
+    "프랑스": "EUR",
     "중국": "CNY",
     "대만": "TWD",
     "캐나다": "CAD",
+    "이탈리아": "EUR",
+    "네덜란드": "EUR",
     "영국": "GBP",
+
+    "USA": "USD",
+    "JAPAN": "JPY",
+    "KOREA": "KRW",
+    "CHINA": "CNY",
+    "TAIWAN": "TWD",
+    "CANADA": "CAD",
+    "UK": "GBP",
+    "FRANCE": "EUR",
+    "GERMANY": "EUR",
+    "NETHERLANDS": "EUR",
+    "ITALY": "EUR",
 }
+
 
 class LedgerEntryCreateSerializer(serializers.ModelSerializer):
     date = serializers.DateField(format="%Y-%m-%d", input_formats=["%Y-%m-%d"])
@@ -131,6 +148,7 @@ class LedgerEntryCreateSerializer(serializers.ModelSerializer):
         instance.save()
         return instance
 
+
 class LedgerEntrySimpleSerializer(serializers.ModelSerializer):
     class Meta:
         model = LedgerEntry
@@ -171,3 +189,47 @@ class ThisMonthSummarySerializer(serializers.Serializer):
                 "krw_currency": "KRW",
             },
         }
+
+
+class BudgetDiffWithKrwSerializer(serializers.Serializer):
+    foreign_amount = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True)
+    foreign_currency = serializers.CharField()
+    krw_amount = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True)
+    krw_currency = serializers.CharField()
+
+
+class BudgetDiffForeignOnlySerializer(serializers.Serializer):
+    foreign_amount = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True)
+    foreign_currency = serializers.CharField()
+
+
+class MonthlyCategoryItemSerializer(serializers.Serializer):
+    code = serializers.CharField()
+    label = serializers.CharField()
+    foreign_amount = serializers.DecimalField(max_digits=18, decimal_places=2)
+    foreign_currency = serializers.CharField()
+    krw_amount = serializers.DecimalField(max_digits=18, decimal_places=2)
+    krw_currency = serializers.CharField()
+    budget_diff = BudgetDiffForeignOnlySerializer()
+
+
+class MonthlyLivingExpenseSerializer(serializers.Serializer):
+    foreign_amount = serializers.DecimalField(max_digits=18, decimal_places=2)
+    foreign_currency = serializers.CharField()
+    krw_amount = serializers.DecimalField(max_digits=18, decimal_places=2)
+    krw_currency = serializers.CharField()
+
+
+class BaseDispatchCostSerializer(serializers.Serializer):
+    airfare = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True)
+    insurance = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True)
+    visa = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True)
+    tuition = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True)
+
+
+class MonthlyCategoryDashboardSerializer(serializers.Serializer):
+    month = serializers.CharField()
+    living_expense = MonthlyLivingExpenseSerializer()
+    living_expense_budget_diff = BudgetDiffWithKrwSerializer()
+    categories = MonthlyCategoryItemSerializer(many=True)
+    base_dispatch_cost = BaseDispatchCostSerializer()

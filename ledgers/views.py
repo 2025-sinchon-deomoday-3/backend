@@ -6,9 +6,34 @@ from datetime import datetime, date as date_type
 from collections import defaultdict
 from datetime import date
 from django.db.models import QuerySet
+from rates.views import convert_to_krw, convert_from_krw
 
 from .serializers import *
 from .models import *
+
+# 생활비용 (용돈, 기타는 제외)
+LIVING_CATEGORIES = {
+    "FOOD",
+    "HOUSING",
+    "TRANSPORT",
+    "SHOPPING",
+    "TRAVEL",
+    "STUDY_MATERIALS",
+}
+
+COUNTRY_TO_CURRENCY = {
+    "한국": "KRW",
+    "미국": "USD",
+    "일본": "JPY",
+    "독일": "EUR",
+    "프랑스": "EUR",
+    "중국": "CNY",
+    "대만": "TWD",
+    "캐나다": "CAD",
+    "이탈리아": "EUR",
+    "네덜란드": "EUR",
+    "영국": "GBP",
+}
 
 
 def ok(message, data=None, status=200):
@@ -91,61 +116,130 @@ class MyLedgerAllCategoryView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        qs = (
+        user = request.user
+        today = date.today()
+        month_start = today.replace(day=1)
+
+        # 이번달만 조회
+        entries = (
             LedgerEntry.objects
-            .filter(user=request.user)
+            .filter(user=user, date__gte=month_start, date__lte=today)
             .order_by("-date", "-created_at")
         )
 
-        months = defaultdict(list)
-        for e in qs:
-            months[e.date.replace(day=1)].append(e)
+        foreign_currency = self._foreign_currency(user)
 
-        cat_order = self._category_order()
-        cat_label = self._category_label_map()
+        # 카테고리별 합계
+        category_totals = defaultdict(lambda: {
+            "krw": Decimal("0.00"),
+            "foreign": Decimal("0.00"),
+        })
 
-        month_blocks = []
-        for month_key in sorted(months.keys(), reverse=True):
-            by_cat = defaultdict(list)
-            for e in months[month_key]:
-                by_cat[e.category].append(e)
+        # 생활비 전체 합계
+        living_krw_total = Decimal("0.00")
+        living_foreign_total = Decimal("0.00")
 
-            categories = []
-            for code in cat_order:
-                entries = by_cat.get(code, [])
-                items = LedgerEntrySimpleSerializer(entries, many=True).data
-                categories.append(
-                    {
-                        "code": code,
-                        "label": cat_label.get(code, code),
-                        "items": items,
-                    }
-                )
+        for entry in entries:
+            krw_amount = self._to_krw(entry)
+            if krw_amount is None:
+                continue
 
-            month_blocks.append(
+            foreign_amount = self._to_foreign(krw_amount, foreign_currency)
+
+            category_totals[entry.category]["krw"] += krw_amount
+            category_totals[entry.category]["foreign"] += foreign_amount
+
+            if entry.category in LIVING_CATEGORIES:
+                living_krw_total += krw_amount
+                living_foreign_total += foreign_amount
+
+        for cat_sum in category_totals.values():
+            cat_sum["krw"] = cat_sum["krw"].quantize(Decimal("0.01"))
+            cat_sum["foreign"] = cat_sum["foreign"].quantize(Decimal("0.01"))
+
+        living_krw_total = living_krw_total.quantize(Decimal("0.01"))
+        living_foreign_total = living_foreign_total.quantize(Decimal("0.01"))
+
+        label_map = self._category_label_map()
+        existing_codes = [code for code, _ in LedgerEntry.Category.choices]
+
+        categories_payload = []
+        for code in existing_codes:
+            # 용돈은 빼주기
+            if code == "ALLOWANCE":
+                continue
+
+            summed = category_totals.get(code, {
+                "krw": Decimal("0.00"),
+                "foreign": Decimal("0.00"),
+            })
+            categories_payload.append(
                 {
-                    "month": month_key.strftime("%Y-%m"),
-                    "categories": categories,
+                    "code": code,
+                    "label": label_map.get(code, code),
+                    "foreign_amount": summed["foreign"],
+                    "foreign_currency": foreign_currency,
+                    "krw_amount": summed["krw"],
+                    "krw_currency": "KRW",
+                    "budget_diff": {   # 카테고리에서는 원화 보여주지 않음...(교환국 화폐 기준 보여주기)
+                        "foreign_amount": None,
+                        "foreign_currency": foreign_currency,
+                    },
                 }
             )
 
-        return ok("내 가계부 카테고리별 조회 성공", month_blocks)
 
-    def _category_order(self):
-        order = [
-            "FOOD",
-            "HOUSING",
-            "TRANSPORT",
-            "SHOPPING",
-            "TRAVEL",
-            "STUDY_MATERIALS",
-            "ALLOWANCE",
-            "ETC",
-        ]
-        existing = {code for code, _ in LedgerEntry.Category.choices}
-        return [c for c in order if c in existing] + [
-            c for c in existing if c not in order
-        ]
+            payload = {
+                "month": today.strftime("%Y-%m"),
+                "living_expense": {
+                    "foreign_amount": living_foreign_total,
+                    "foreign_currency": foreign_currency,
+                    "krw_amount": living_krw_total,
+                    "krw_currency": "KRW",
+                },
+                "living_expense_budget_diff": {
+                    "foreign_amount": None,
+                    "foreign_currency": foreign_currency,
+                    "krw_amount": None,
+                    "krw_currency": "KRW",
+                },
+                "categories": categories_payload,
+                "base_dispatch_cost": {
+                    "airfare": None,
+                    "insurance": None,
+                    "visa": None,
+                    "tuition": None,
+                },
+            }
+
+
+        serializer = MonthlyCategoryDashboardSerializer(payload)
+        return ok("내 가계부 카테고리별 합산 조회 성공", serializer.data)
+
+    def _to_krw(self, entry: LedgerEntry):
+        if entry.currency_code == "KRW":
+            return entry.amount
+        return convert_to_krw(entry.amount, entry.currency_code)
+
+    def _to_foreign(self, krw_amount: Decimal, foreign_currency: str):
+        if foreign_currency == "KRW":
+            return krw_amount
+        converted = convert_from_krw(krw_amount, foreign_currency)
+        if converted is None:
+            return Decimal("0.00")
+        return converted
+
+    def _foreign_currency(self, user):
+        exchange_profile = getattr(user, "exchange_profile", None)
+        if not exchange_profile:
+            return "KRW"
+
+        country_name = getattr(exchange_profile, "exchange_country", None)
+        if not country_name:
+            return "KRW"
+
+        name = country_name.strip()
+        return COUNTRY_TO_CURRENCY.get(name, "KRW")
 
     def _category_label_map(self):
         return {code: label for code, label in LedgerEntry.Category.choices}
