@@ -320,7 +320,7 @@ class ThisMonthSummaryView(APIView):
         serializer = ThisMonthSummarySerializer(result)
         return ok("이번달 수입/지출 합계 조회 성공", serializer.data)
 
-    def _calculate_summary(self, user, entries, today):
+    def _calculate_summary(self, user, entries, today=None):
         foreign_currency = self._foreign_currency(user)
 
         def _sum(entry_type):
@@ -329,27 +329,28 @@ class ThisMonthSummaryView(APIView):
             total_krw = Decimal("0.00")
 
             for entry in qs:
-                if entry.currency_code == "KRW":
-                    total_krw += entry.amount
-                    converted = convert_from_krw(entry.amount, foreign_currency)
-                    if converted:
-                        total_foreign += converted
+                if entry.amount_converted and entry.converted_currency_code == "KRW":
+                    krw_amount = entry.amount_converted
+                else:
+                    krw_amount = (
+                        entry.amount if entry.currency_code == "KRW"
+                        else convert_to_krw(entry.amount, entry.currency_code)
+                    )
+
+                if krw_amount is None:
                     continue
 
-                if entry.currency_code == foreign_currency:
-                    total_foreign += entry.amount
-                    converted = convert_to_krw(entry.amount, foreign_currency)
-                    if converted:
-                        total_krw += converted
-                    continue
+                total_krw += krw_amount
 
-                krw = convert_to_krw(entry.amount, entry.currency_code)
-                if krw is None:
-                    continue
-                total_krw += krw
-                foreign = convert_from_krw(krw, foreign_currency)
-                if foreign:
-                    total_foreign += foreign
+                if foreign_currency == "KRW":
+                    total_foreign += krw_amount
+                else:
+                    if entry.amount_converted and entry.converted_currency_code == foreign_currency:
+                        total_foreign += entry.amount_converted
+                    else:
+                        foreign_amount = convert_from_krw(krw_amount, foreign_currency)
+                        if foreign_amount:
+                            total_foreign += foreign_amount
 
             total_foreign = total_foreign.quantize(Decimal("0.01"))
             total_krw = total_krw.quantize(Decimal("0.01"))
@@ -359,7 +360,7 @@ class ThisMonthSummaryView(APIView):
         expense_foreign, expense_krw = _sum(LedgerEntry.EntryType.EXPENSE)
 
         return {
-            "month": today.strftime("%Y-%m"),
+            "month": today.strftime("%Y-%m") if today else "전체 기간",
             "foreign_currency": foreign_currency,
             "income_foreign": income_foreign,
             "income_krw": income_krw,
@@ -391,7 +392,7 @@ class TotalSummaryView(APIView):
         serializer = ThisMonthSummarySerializer(result)
         return ok("전체 수입/지출 합계 조회 성공", serializer.data)
 
-    def _calculate_summary(self, user, entries):
+    def _calculate_summary(self, user, entries, today=None):
         foreign_currency = self._foreign_currency(user)
 
         def _sum(entry_type):
@@ -400,27 +401,28 @@ class TotalSummaryView(APIView):
             total_krw = Decimal("0.00")
 
             for entry in qs:
-                if entry.currency_code == "KRW":
-                    total_krw += entry.amount
-                    converted = convert_from_krw(entry.amount, foreign_currency)
-                    if converted:
-                        total_foreign += converted
+                if entry.amount_converted and entry.converted_currency_code == "KRW":
+                    krw_amount = entry.amount_converted
+                else:
+                    krw_amount = (
+                        entry.amount if entry.currency_code == "KRW"
+                        else convert_to_krw(entry.amount, entry.currency_code)
+                    )
+
+                if krw_amount is None:
                     continue
 
-                if entry.currency_code == foreign_currency:
-                    total_foreign += entry.amount
-                    converted = convert_to_krw(entry.amount, foreign_currency)
-                    if converted:
-                        total_krw += converted
-                    continue
+                total_krw += krw_amount
 
-                krw = convert_to_krw(entry.amount, entry.currency_code)
-                if krw is None:
-                    continue
-                total_krw += krw
-                foreign = convert_from_krw(krw, foreign_currency)
-                if foreign:
-                    total_foreign += foreign
+                if foreign_currency == "KRW":
+                    total_foreign += krw_amount
+                else:
+                    if entry.amount_converted and entry.converted_currency_code == foreign_currency:
+                        total_foreign += entry.amount_converted
+                    else:
+                        foreign_amount = convert_from_krw(krw_amount, foreign_currency)
+                        if foreign_amount:
+                            total_foreign += foreign_amount
 
             total_foreign = total_foreign.quantize(Decimal("0.01"))
             total_krw = total_krw.quantize(Decimal("0.01"))
@@ -430,7 +432,7 @@ class TotalSummaryView(APIView):
         expense_foreign, expense_krw = _sum(LedgerEntry.EntryType.EXPENSE)
 
         return {
-            "month": "전체 기간",
+            "month": today.strftime("%Y-%m") if today else "전체 기간",
             "foreign_currency": foreign_currency,
             "income_foreign": income_foreign,
             "income_krw": income_krw,
