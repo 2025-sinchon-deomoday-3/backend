@@ -25,7 +25,7 @@ class CountryOption(models.TextChoices):
 class ExchangeUniversity(models.Model):    
     univ_name = models.CharField(max_length=120, unique=True)
     country = models.CharField(max_length=20, choices=CountryOption.choices);
-    city = models.CharField(max_length=20)
+    city = models.CharField(max_length=50)
 
     def __str__(self):
         return self.univ_name

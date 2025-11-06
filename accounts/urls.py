@@ -13,4 +13,12 @@ urlpatterns = [
     path('logout/', LogoutView.as_view(), name='logout'),
     path("token/refresh/", CookieTokenRefreshView.as_view(), name="token_refresh"),
     path('token/', TokenObtainPairView.as_view(), name='token_obtain_pair'),  # 로그인(토큰 발급)
+
+    # 회원가입 시 본교, 파견국가, 파견학교 검색
+    path("universities/", UniversitySearchView.as_view(), name="university_list"),
+    path("countries/", CountryListView.as_view(), name="country_list"),
+    path("exchange-universities/", ExchangeUniversitySearchView.as_view(), name="exchange_university_list"),
+
+    # 프로필
+    path("profile/", MyProfileView.as_view(), name="my-profile"),
 ]
