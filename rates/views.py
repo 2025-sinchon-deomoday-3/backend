@@ -22,7 +22,12 @@ from rest_framework.response import Response
 # 1외화 = 1/rate KRW
 def convert_to_krw(amount, from_currency):
     try:
-        krw_to_foreign = ExchangeRate.objects.get(target_currency=from_currency).rate
+        # 중복된 환율 데이터 중 최신 것만 사용하도록
+        rate_obj = (ExchangeRate.objects.filter(target_currency=from_currency).order_by("-updated_at").first())
+        if not rate_obj:
+            return None
+
+        krw_to_foreign = rate_obj.rate
         converted = Decimal(amount) / Decimal(krw_to_foreign)
         return converted.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     except ObjectDoesNotExist:
@@ -31,7 +36,12 @@ def convert_to_krw(amount, from_currency):
 #2) 한화 -> 외화
 def convert_from_krw(amount, to_currency):
     try:
-        krw_to_foreign = ExchangeRate.objects.get(target_currency=to_currency).rate
+        # 중복된 환율 데이터 중 최신 것만 사용하도록
+        rate_obj = (ExchangeRate.objects.filter(target_currency=to_currency).order_by("-updated_at").first())
+        if not rate_obj:
+            return None
+
+        krw_to_foreign = rate_obj.rate
         converted = Decimal(amount) * Decimal(krw_to_foreign)
         return converted.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     except ObjectDoesNotExist:
