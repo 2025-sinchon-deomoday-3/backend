@@ -10,7 +10,7 @@ from rates.views import convert_to_krw, convert_from_krw
 
 from .serializers import *
 from .models import *
-from budgets.models import Budget, LivingBudget
+from budgets.models import Budget, LivingBudget, BaseBudget, BaseBudgetItem
 from decimal import Decimal
 
 # 생활비용 (용돈, 기타는 제외)
@@ -193,6 +193,32 @@ class MyLedgerAllCategoryView(APIView):
             diff_krw = Decimal("0.00")
             diff_foreign = Decimal("0.00")
             diff_sign = "-"
+        
+        # 기본파견비용
+        base_dispatch_payload = {"airfare": None, "insurance": None, "visa": None, "tuition": None}
+
+        if budget and hasattr(budget, "base_budget"):
+            base_budget = budget.base_budget
+            items = base_budget.items.all()
+
+            for item in items:
+                foreign_amount = convert_from_krw(item.exchange_amount, foreign_currency)
+                krw_amount = item.exchange_amount.quantize(Decimal("0.01"))
+                payload_item = {
+                    "foreign_amount": foreign_amount.quantize(Decimal("0.01")) if foreign_amount else Decimal("0.00"),
+                    "foreign_currency": foreign_currency,
+                    "krw_amount": krw_amount,
+                    "krw_currency": "KRW",
+                }
+
+                if item.type == BaseBudgetItem.BaseItem.FLIGHT:
+                    base_dispatch_payload["airfare"] = payload_item
+                elif item.type == BaseBudgetItem.BaseItem.INSURANCE:
+                    base_dispatch_payload["insurance"] = payload_item
+                elif item.type == BaseBudgetItem.BaseItem.VISA:
+                    base_dispatch_payload["visa"] = payload_item
+                elif item.type == BaseBudgetItem.BaseItem.TUITION:
+                    base_dispatch_payload["tuition"] = payload_item
 
         # 카테고리 리스트
         label_map = self._category_label_map()
@@ -223,7 +249,7 @@ class MyLedgerAllCategoryView(APIView):
                 }
             )
 
-
+            # 최종 응답
             payload = {
                 "month": today.strftime("%Y-%m"),
                 "living_expense": {
@@ -240,12 +266,7 @@ class MyLedgerAllCategoryView(APIView):
                     "sign": diff_sign,  # +면 더 쓴 거, -면 덜 쓴 거. 예산안 대비.
                 },
                 "categories": categories_payload,
-                "base_dispatch_cost": {
-                    "airfare": None,
-                    "insurance": None,
-                    "visa": None,
-                    "tuition": None,
-                },
+                "base_dispatch_cost": base_dispatch_payload,
             }
 
 
