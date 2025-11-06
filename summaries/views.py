@@ -12,6 +12,7 @@ from .models import DetailProfile, SummarySnapshot
 from .serializers import (DetailProfileSerializer, LedgerSummarySerializer)
 from ledgers.models import LedgerEntry
 from rates.views import convert_to_krw, convert_from_krw
+from budgets.models import BaseBudget
 
 
 INCLUDED_CATEGORIES = [
@@ -244,7 +245,7 @@ class LedgerSummaryView(APIView):
             "current_rate_krw_amount": (total_current_krw / months).quantize(Decimal("0.01")),
         }
 
-        base_dispatch_cost = self._empty_dispatch_cost(foreign_currency)
+        base_dispatch_cost = self._build_dispatch_cost(user, foreign_currency)
 
         serializer = LedgerSummarySerializer(
             {
@@ -323,13 +324,63 @@ class LedgerSummaryView(APIView):
 
         return result, total_foreign, total_krw, total_current_krw
 
-    def _empty_dispatch_cost(self, foreign_currency):
-        return {
-            "tuition": {
-                "foreign_amount": None,
+    def _build_dispatch_cost(self, user, foreign_currency):
+        base_budget = BaseBudget.objects.filter(user=user).first()
+        if not base_budget:
+            return self._empty_dispatch_cost(foreign_currency)
+
+        dispatch_items = {
+            "flight": {
+                "foreign_amount": getattr(base_budget, "flight_foreign_amount", None),
                 "foreign_currency": foreign_currency,
-                "krw_amount": None,
+                "krw_amount": getattr(base_budget, "flight_krw_amount", None),
                 "krw_currency": "KRW",
-                "current_rate_krw_amount": None,
-            }
+            },
+            "insurance": {
+                "foreign_amount": getattr(base_budget, "insurance_foreign_amount", None),
+                "foreign_currency": foreign_currency,
+                "krw_amount": getattr(base_budget, "insurance_krw_amount", None),
+                "krw_currency": "KRW",
+            },
+            "visa": {
+                "foreign_amount": getattr(base_budget, "visa_foreign_amount", None),
+                "foreign_currency": foreign_currency,
+                "krw_amount": getattr(base_budget, "visa_krw_amount", None),
+                "krw_currency": "KRW",
+            },
+            "tuition": {
+                "foreign_amount": getattr(base_budget, "tuition_foreign_amount", None),
+                "foreign_currency": foreign_currency,
+                "krw_amount": getattr(base_budget, "tuition_krw_amount", None),
+                "krw_currency": "KRW",
+            },
         }
+
+        for key, item in dispatch_items.items():
+            if item["foreign_amount"] is None:
+                item["current_rate_krw_amount"] = None
+                continue
+            item["current_rate_krw_amount"] = convert_to_krw(
+                item["foreign_amount"],
+                item["foreign_currency"],
+            )
+
+        total_foreign = sum(
+            (item["foreign_amount"] or Decimal("0")) for item in dispatch_items.values()
+        )
+        total_krw = sum(
+            (item["krw_amount"] or Decimal("0")) for item in dispatch_items.values()
+        )
+        total_current = sum(
+            (item["current_rate_krw_amount"] or Decimal("0")) for item in dispatch_items.values()
+        )
+
+        dispatch_items["total"] = {
+            "foreign_amount": total_foreign.quantize(Decimal("0.01")),
+            "foreign_currency": foreign_currency,
+            "krw_amount": total_krw.quantize(Decimal("0.01")),
+            "krw_currency": "KRW",
+            "current_rate_krw_amount": total_current.quantize(Decimal("0.01")),
+        }
+
+        return dispatch_items
