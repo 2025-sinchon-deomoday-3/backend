@@ -195,15 +195,27 @@ class MyLedgerAllCategoryView(APIView):
             diff_sign = "-"
         
         # 기본파견비용
-        base_dispatch_payload = {"airfare": None, "insurance": None, "visa": None, "tuition": None}
+        base_dispatch_payload = {
+            "total": {"foreign_amount": Decimal("0.00"), "foreign_currency": foreign_currency, "krw_amount": Decimal("0.00"), "krw_currency": "KRW"},
+            "airfare": None, "insurance": None, "visa": None, "tuition": None
+        }
 
         if budget and hasattr(budget, "base_budget"):
             base_budget = budget.base_budget
             items = base_budget.items.all()
 
+            total_krw = Decimal("0.00")
+            total_foreign = Decimal("0.00")
+
             for item in items:
-                foreign_amount = convert_from_krw(item.exchange_amount, foreign_currency)
                 krw_amount = item.exchange_amount.quantize(Decimal("0.01"))
+                foreign_amount = convert_from_krw(krw_amount, foreign_currency)
+                if foreign_amount is None:
+                    foreign_amount = Decimal("0.00")
+
+                total_krw += krw_amount
+                total_foreign += foreign_amount
+                
                 payload_item = {
                     "foreign_amount": foreign_amount.quantize(Decimal("0.01")) if foreign_amount else Decimal("0.00"),
                     "foreign_currency": foreign_currency,
@@ -219,6 +231,13 @@ class MyLedgerAllCategoryView(APIView):
                     base_dispatch_payload["visa"] = payload_item
                 elif item.type == BaseBudgetItem.BaseItem.TUITION:
                     base_dispatch_payload["tuition"] = payload_item
+
+            base_dispatch_payload["total"] = {
+                "foreign_amount": total_foreign.quantize(Decimal("0.01")),
+                "foreign_currency": foreign_currency,
+                "krw_amount": total_krw.quantize(Decimal("0.01")),
+                "krw_currency": "KRW",
+            }
 
         # 카테고리 리스트
         label_map = self._category_label_map()
@@ -268,7 +287,6 @@ class MyLedgerAllCategoryView(APIView):
                 "categories": categories_payload,
                 "base_dispatch_cost": base_dispatch_payload,
             }
-
 
         serializer = MonthlyCategoryDashboardSerializer(payload)
         return ok("내 가계부 카테고리별 합산 조회 성공", serializer.data)
