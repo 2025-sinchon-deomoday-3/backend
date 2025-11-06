@@ -48,6 +48,27 @@ class BaseBudgetSerializer(serializers.ModelSerializer):
 
         base_budget.update_total()
         return base_budget
+    
+    def update(self, instance, validated_data):
+        items_data = validated_data.pop("items", [])
+
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+
+        for item_data in items_data:
+            item_type = item_data.get("type")
+            item_obj = instance.items.filter(type=item_type).first()
+
+            if item_obj:
+                for attr, value in item_data.items():
+                    setattr(item_obj, attr, value)
+                item_obj.save()
+            else:
+                BaseBudgetItem.objects.create(base_budget=instance, **item_data)
+
+        instance.update_total()
+        return instance
 
 
 
@@ -67,13 +88,34 @@ class LivingBudgetSerializer(serializers.ModelSerializer):
         fields = ["id", "total_amount", "items", "created_at", "updated_at"]
 
     def create(self, validated_data):
-        items_data = validated_data.pop("items", [])
-        living_budget = LivingBudget.objects.create(**validated_data)
+        # items_data = validated_data.pop("items", [])
+        # living_budget = LivingBudget.objects.create(**validated_data)
 
-        for item_data in items_data:
-            LivingBudgetItem.objects.create(living_budget=living_budget, **item_data)
+        # for item_data in items_data:
+        #     LivingBudgetItem.objects.create(living_budget=living_budget, **item_data)
 
-        return living_budget
+        # return living_budget
+        base_budget_data = validated_data.pop("base_budget", None)
+        living_budget_data = validated_data.pop("living_budget", None)
+
+        budget = Budget.objects.create(**validated_data)
+
+        # ---- BaseBudget 처리 ----
+        if base_budget_data:
+            items_data = base_budget_data.pop("items", [])
+            base_budget = BaseBudget.objects.create(budget=budget, **base_budget_data)
+            for item_data in items_data:
+                BaseBudgetItem.objects.create(base_budget=base_budget, **item_data)
+            base_budget.update_total()
+
+        # ---- LivingBudget 처리 ----
+        if living_budget_data:
+            items_data = living_budget_data.pop("items", [])
+            living_budget = LivingBudget.objects.create(budget=budget, **living_budget_data)
+            for item_data in items_data:
+                LivingBudgetItem.objects.create(living_budget=living_budget, **item_data)
+
+        return budget
 
         
     def update(self, instance, validated_data):
@@ -83,17 +125,33 @@ class LivingBudgetSerializer(serializers.ModelSerializer):
             setattr(instance, attr, value)
         instance.save()
 
-        if items_data is not None:
-            for item_data in items_data:
-                item_type = item_data.get("type")
-                amount = item_data.get("amount")
+        # if items_data is not None:
+        #     for item_data in items_data:
+        #         item_type = item_data.get("type")
+        #         amount = item_data.get("amount")
 
-                item_obj = instance.items.filter(type=item_type).first()
-                if item_obj:
-                    item_obj.amount = amount
-                    item_obj.save()
-                else:
-                    LivingBudgetItem.objects.create(living_budget=instance, **item_data)
+        #         item_obj = instance.items.filter(type=item_type).first()
+        #         if item_obj:
+        #             item_obj.amount = amount
+        #             item_obj.save()
+        #         else:
+        #             LivingBudgetItem.objects.create(living_budget=instance, **item_data)
+
+        for item_data in items_data:
+            item_type = item_data.get("type")
+            amount = item_data.get("amount")
+
+            # 기존 항목 조회
+            item_obj = instance.items.filter(type=item_type).first()
+
+            if item_obj:
+                # 기존 항목 수정
+                for attr, value in item_data.items():
+                    setattr(item_obj, attr, value)
+                item_obj.save()
+            else:
+                # 새 항목 생성 (amount 포함 후에 저장)
+                LivingBudgetItem.objects.create(living_budget=instance, **item_data)
 
         return instance
 
@@ -127,6 +185,8 @@ class BudgetSerializer(serializers.ModelSerializer):
             LivingBudgetSerializer().create(living_budget_data)
 
         return budget
+    
+    
 
     def update(self, instance, validated_data):
         base_budget_data = validated_data.pop("base_budget", None)

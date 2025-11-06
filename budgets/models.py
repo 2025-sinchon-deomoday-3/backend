@@ -80,12 +80,13 @@ class LivingBudget(models.Model):
 class LivingBudgetItem(models.Model):
     class LivingItem(models.TextChoices):
         FOOD = "FOOD", "식비"
-        TRANSPORT = "TRANSPORT", "교통비"
         HOUSING = "HOUSING", "주거비"
+        TRANSPORT = "TRANSPORT", "교통비"
         SHOPPING = "SHOPPING", "쇼핑비"
-        CULTURE = "CULTURE", "문화생활"
         TRAVEL = "TRAVEL", "여행비"
-        TEXTBOOK = "TEXTBOOK", "교재비"
+        STUDY_MATERIALS = "STUDY_MATERIALS", "교재비"
+        ALLOWANCE = "ALLOWANCE", "용돈"
+        ETC = "ETC", "기타"
 
     living_budget = models.ForeignKey(LivingBudget, on_delete=models.CASCADE, related_name="items")
     type = models.CharField(max_length=20, choices=LivingItem.choices)

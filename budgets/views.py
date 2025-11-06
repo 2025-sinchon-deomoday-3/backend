@@ -33,11 +33,21 @@ class BudgetView(APIView):
     
     #등록
     def post(self, request):
+        return self._create_or_update(request, is_create=True)
+
+    #수정 
+    def put(self, request):
+        return self._create_or_update(request, is_create=False)
+
+
+
+    #등록/수정 공통 로직 
+    def _create_or_update(self, request, is_create):
         budget, created = Budget.objects.get_or_create(user=request.user)
         data = request.data
 
         # Base Budget 처리 
-        base_budget_data = data.get("base_buget")
+        base_budget_data = data.get("base_budget")
         if base_budget_data:
             base_budget, _ = BaseBudget.objects.get_or_create(budget=budget)
             base_serializer = BaseBudgetSerializer(
@@ -47,6 +57,7 @@ class BudgetView(APIView):
                 base_serializer.save()
             else:
                 return Response(base_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
 
         # Living Budget 처리
         living_budget_data = data.get("living_budget")

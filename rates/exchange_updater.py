@@ -9,7 +9,7 @@ import django
 #   - 로컬: dongleDongle.settings.dev
 #   - 배포: dongleDongle.settings.prod
 # os.environ.setdefault("DJANGO_SETTINGS_MODULE", "dongleDongle.settings.dev")
-os.environ.setdefault("DJANGO_SETTINGS_MODULE", "dongleDongle.settings.dev")
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "dongleDongle.settings.prod")
 django.setup()
 
 from django.conf import settings
