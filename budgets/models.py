@@ -24,7 +24,7 @@ class CurrencyOption(models.TextChoices):
 
 #예산안 내 기본 파견비
 class BaseBudget(models.Model):
-    budget = models.OneToOneField(Budget, on_delete=models.CASCADE, related_name="base_budgets")
+    budget = models.OneToOneField(Budget, on_delete=models.CASCADE, related_name="base_budget")
     total_amount_krw = models.DecimalField(max_digits=20, decimal_places=2, default=0)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -66,7 +66,7 @@ class BaseBudgetItem(models.Model):
     
 # 예산안 내 생활비 
 class LivingBudget(models.Model):
-    budget = models.OneToOneField(Budget, on_delete=models.CASCADE, related_name="living_budgets")
+    budget = models.OneToOneField(Budget, on_delete=models.CASCADE, related_name="living_budget")
     total_amount = models.IntegerField(default=0) #한 달 생활비(필수 입력) 
     # total_amount_krw = models.DecimalField(max_digits=20, decimal_places=2, default=0) #선택 입력 값까지 합산  
     created_at = models.DateTimeField(auto_now_add=True)

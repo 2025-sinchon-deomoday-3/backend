@@ -23,21 +23,48 @@ class BudgetView(APIView):
 
     #조회
     def get(self, request):
-        budget = Budget.objects.filter(user=request.user).first()
+        budget, _ = Budget.objects.get_or_create(user=request.user)
+
+        BaseBudget.objects.get_or_create(budget=budget)
+        LivingBudget.objects.get_or_create(budget=budget)
+
         serilizer = BudgetSerializer(budget)
         return Response(serilizer.data)
-    #등록 
+    
+    #등록
     def post(self, request):
         budget, created = Budget.objects.get_or_create(user=request.user)
+        data = request.data
 
-        serializer = BudgetSerializer(budget, data=request.data, partial=True)
-        if serializer.is_valid():
-            serializer.save(user=request.user)
-            return Response(serializer.data, status=status.HTTP_200_OK if not created else status.HTTP_201_CREATED)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        # Base Budget 처리 
+        base_budget_data = data.get("base_buget")
+        if base_budget_data:
+            base_budget, _ = BaseBudget.objects.get_or_create(budget=budget)
+            base_serializer = BaseBudgetSerializer(
+                base_budget, data=base_budget_data, partial=True
+            )
+            if base_serializer.is_valid():
+                base_serializer.save()
+            else:
+                return Response(base_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
+        # Living Budget 처리
+        living_budget_data = data.get("living_budget")
+        if living_budget_data:
+            living_budget, _ = LivingBudget.objects.get_or_create(budget=budget)
+            living_serializer = LivingBudgetSerializer(
+                living_budget, data=living_budget_data, partial=True
+            )
+            if living_serializer.is_valid():
+                living_serializer.save()
+            else:
+                return Response(living_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+            
 
-
+        # Budget 전체 직렬화
+        serializer = BudgetSerializer(budget)
+        return Response(serializer.data, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
+    
 #기본 파견비 조회 및 등록
 class BaseBudgetView(APIView):
     permission_classes = [permissions.AllowAny]
