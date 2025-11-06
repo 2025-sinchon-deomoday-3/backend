@@ -243,30 +243,55 @@ class MyLedgerAllCategoryView(APIView):
         label_map = self._category_label_map()
         existing_codes = [code for code, _ in LedgerEntry.Category.choices]
 
+        # 예산안 연동
+        living_budget_items = {}
+        if budget and hasattr(budget, "living_budget"):
+            try:
+                for item in budget.living_budget.items.all():
+                    living_budget_items[item.type] = item.amount  # 한화 기준
+            except Exception:
+                living_budget_items = {}
+
         categories_payload = []
         for code in existing_codes:
             # 용돈은 빼주기
             if code == "ALLOWANCE":
                 continue
 
-            summed = category_totals.get(code, {
-                "krw": Decimal("0.00"),
-                "foreign": Decimal("0.00"),
-            })
-            categories_payload.append(
-                {
-                    "code": code,
-                    "label": label_map.get(code, code),
-                    "foreign_amount": summed["foreign"],
-                    "foreign_currency": foreign_currency,
-                    "krw_amount": summed["krw"],
-                    "krw_currency": "KRW",
-                    "budget_diff": {   # 카테고리에서는 원화 보여주지 않음...(교환국 화폐 기준 보여주기)
-                        "foreign_amount": None,
+            summed = category_totals.get(code, {"krw": Decimal("0.00"), "foreign": Decimal("0.00")})
+            actual_krw = summed["krw"]
+            actual_foreign = summed["foreign"]
+
+            # 기본값: 예산 미등록 시
+            budget_foreign_diff = None
+            sign = None
+
+            # 예산안 등록된 카테고리라면 비교 수행 / 미등록은 None 그대로 유지
+            if code in living_budget_items:
+                budget_krw = living_budget_items[code]
+                budget_foreign = convert_from_krw(budget_krw, foreign_currency)
+
+                diff_krw = actual_krw - budget_krw
+                diff_foreign = actual_foreign - budget_foreign
+                sign = "+" if diff_krw > 0 else "-"
+
+                budget_foreign_diff = diff_foreign.quantize(Decimal("0.01"))
+            
+                categories_payload.append(
+                    {
+                        "code": code,
+                        "label": label_map.get(code, code),
+                        "foreign_amount": actual_foreign,
                         "foreign_currency": foreign_currency,
-                    },
-                }
-            )
+                        "krw_amount": actual_krw,
+                        "krw_currency": "KRW",
+                        "budget_diff": {
+                            "foreign_amount": budget_foreign_diff,
+                            "foreign_currency": foreign_currency,
+                            "sign": sign,
+                        },
+                    }
+                )
 
             # 최종 응답
             payload = {
