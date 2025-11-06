@@ -6,7 +6,11 @@ from .models import *
 class BaseBudgetItemSerializer(serializers.ModelSerializer):
     class Meta:
         model = BaseBudgetItem
-        fields = ["id", "type", "amount", "currency", "created_at", "updated_at"]
+        fields = ["id", "type", "amount", "currency", "exchange_amount", "created_at", "updated_at"]
+
+    #exchange_budget 출력
+    # def create(self, validated_data):
+        
 
 
 #기본 파견비 시리얼라이저(*Nested Serializer)

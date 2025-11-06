@@ -1,5 +1,6 @@
 from django.db import models
 from django.conf import settings
+from rates.utils import convert_to_krw
 
 # Create your models here.
 #예산안
@@ -20,7 +21,6 @@ class CurrencyOption(models.TextChoices):
     TWD = "TWD", "대만 달러 (TWD)"
     GBP = "GBP", "영국 파운드 (GBP)"
     CAD = "CAD", "캐나다 달러 (CAD)"
-
 
 #예산안 내 기본 파견비
 class BaseBudget(models.Model):
@@ -50,15 +50,26 @@ class BaseBudgetItem(models.Model):
     type = models.CharField(max_length=10, choices=BaseItem.choices)
     amount = models.DecimalField(max_digits=20, decimal_places=6)
     currency = models.CharField(max_length=5, choices=CurrencyOption.choices)
+    exchange_amount = models.DecimalField(max_digits=20, decimal_places=6, null=True) #한화 변환 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     
+    def save(self, *args, **kwargs):
+        # 통화가 KRW가 아닐 때만 환전
+        if self.currency != "KRW":
+            converted = convert_to_krw(self.amount, self.currency)
+            self.exchange_amount = converted if converted is not None else None
+        else:
+            self.exchange_amount = self.amount
+
+        super().save(*args, **kwargs)
+
     #한화 변환 함수(rates.util에서 가져옴)
     def get_amount_in_krw(self):
-        from rates.utils import convert_to_krw
         return convert_to_krw(self.amount, self.currency)
 
     #한화 변환 함수(for 합산) 
+    # KRW가 아닌 경우에 get_amount_in_krw 함수 -> 한화로 변환
     def get_krw_amount(self):
         if self.currency != "KRW":
             return self.get_amount_in_krw()
