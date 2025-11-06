@@ -191,20 +191,98 @@ class FeedDetailView(APIView):
 
         user = feed.user
         months = get_months(feed.snapshot_exchange_period)
-            
-        # 총 파견비용 = Ledger + BaseBudget
-        total_foreign, total_krw = get_total_expense_with_budget(user)
 
-        # 평균 생활비 = Ledger만 (BaseBudget 제외)
+        # 교환국 화폐
+        exchange_profile = getattr(user, "exchange_profile", None)
+        if not exchange_profile:
+            return bad("교환학생 정보가 없습니다.")
+        target_currency = COUNTRY_TO_CURRENCY.get(exchange_profile.exchange_country, "KRW")
+
+        # 한달평균생활비 계산
+        living_categories = ["FOOD", "HOUSING", "TRANSPORT", "SHOPPING", "TRAVEL", "STUDY_MATERIALS"]
+
         ledger_foreign, ledger_krw = get_total_ledger_expense(user)
         avg_foreign = safe_divide(ledger_foreign, months)
         avg_krw = safe_divide(ledger_krw, months)
 
-        data["base_dispatch_foreign_amount"] = str(total_foreign.quantize(Decimal("0.01")))
-        data["base_dispatch_krw_amount"] = str(total_krw.quantize(Decimal("0.01")))
-        data["living_expense_foreign_amount"] = str(avg_foreign.quantize(Decimal("0.01")))
-        data["living_expense_krw_amount"] = str(avg_krw.quantize(Decimal("0.01")))
+        # LedgerEntry 지출합
+        entries = LedgerEntry.objects.filter(
+            user=user, entry_type="EXPENSE", category__in=living_categories
+        )
 
+        living_expense_categories = []
+        for entry in entries:
+            krw_amount = convert_to_krw(entry.amount, entry.currency_code)
+            current_krw_amount = convert_to_krw(entry.amount, entry.currency_code, latest=True)
+            foreign_amount = convert_from_krw(krw_amount, target_currency)
+
+            living_expense_categories.append({
+                "code": entry.category,
+                "label": LedgerEntry.Category(entry.category).label,
+                "foreign_amount": str(foreign_amount.quantize(Decimal("0.01"))),
+                "foreign_currency": target_currency,
+                "krw_amount": str(krw_amount.quantize(Decimal("0.01"))),
+                "krw_currency": "KRW",
+                "current_rate_krw_amount": str(current_krw_amount.quantize(Decimal("0.01")))
+            })
+
+        living_expense_summary = {
+            "foreign_amount": str(avg_foreign.quantize(Decimal("0.01"))),
+            "foreign_currency": target_currency,
+            "krw_amount": str(avg_krw.quantize(Decimal("0.01"))),
+            "krw_currency": "KRW",
+            "categories": living_expense_categories,
+        }
+
+        # 기본파견비용
+        base_budget = BaseBudget.objects.filter(user=user).order_by("-created_at").first()
+        base_dispatch_summary = {
+            "foreign_amount": "0",
+            "foreign_currency": target_currency,
+            "krw_amount": "0",
+            "krw_currency": "KRW",
+            "categories": [],
+        }
+
+        if base_budget:
+            fields = [
+                ("flight_cost_krw", "항공권"),
+                ("insurance_cost_krw", "보험료"),
+                ("visa_cost_krw", "비자"),
+                ("tuition_cost_krw", "등록금"),
+            ]
+            total_krw = Decimal("0")
+            categories = []
+
+            for field, label in fields:
+                cost_krw = getattr(base_budget, field, None)
+                if not cost_krw:
+                    continue
+
+                cost_foreign = convert_from_krw(cost_krw, target_currency)
+                current_krw = convert_to_krw(cost_foreign, target_currency, latest=True)
+
+                categories.append({
+                    "code": field.upper().replace("_KRW", ""),
+                    "label": label,
+                    "foreign_amount": str(cost_foreign.quantize(Decimal("0.01"))),
+                    "foreign_currency": target_currency,
+                    "krw_amount": str(cost_krw.quantize(Decimal("0.01"))),
+                    "krw_currency": "KRW",
+                    "current_rate_krw_amount": str(current_krw.quantize(Decimal("0.01"))),
+                })
+                total_krw += cost_krw
+
+            base_dispatch_summary = {
+                "foreign_amount": str(convert_from_krw(total_krw, target_currency).quantize(Decimal("0.01"))),
+                "foreign_currency": target_currency,
+                "krw_amount": str(total_krw.quantize(Decimal("0.01"))),
+                "krw_currency": "KRW",
+                "categories": categories,
+            }
+
+        data["living_expense_summary"] = living_expense_summary
+        data["base_dispatch_summary"] = base_dispatch_summary
         data["like_count"] = like_count
         data["scrap_count"] = scrap_count
         data["liked"] = user_liked
