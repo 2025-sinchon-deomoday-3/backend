@@ -71,3 +71,8 @@ class ConvertView(APIView):
             "converted": result
         })
         return Response(serializers.data)
+
+# 200 테스트용
+class AlwaysOkView(APIView):
+    def get(self, request):
+        return Response({"message": "GET 요청 성공"}, status=200)
