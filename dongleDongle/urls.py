@@ -9,4 +9,5 @@ urlpatterns = [
     path('rates/', include('rates.urls')),
     path('ledgers/', include('ledgers.urls')),
     path('summaries/', include('summaries.urls')),
+    path('feeds/', include('feeds.urls')),
 ] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
