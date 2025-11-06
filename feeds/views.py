@@ -1,5 +1,5 @@
 from decimal import Decimal, ROUND_HALF_UP
-from django.db.models import Count, Max, Sum
+from django.db.models import Count, Max
 from django.shortcuts import get_object_or_404
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -12,6 +12,8 @@ from .serializers import *
 from summaries.models import SummarySnapshot
 from ledgers.models import LedgerEntry
 from rates.views import convert_to_krw, convert_from_krw
+from budgets.models import BaseBudget
+import re
 
 
 COUNTRY_TO_CURRENCY = {
@@ -27,6 +29,67 @@ COUNTRY_TO_CURRENCY = {
     "네덜란드": "EUR",
     "영국": "GBP",
 }
+
+
+# 총 파견비용 합산 -> 가계부 등록 총합 + 기본파견비용
+def get_total_expense_with_budget(user):
+    living_categories = ["FOOD", "HOUSING", "TRANSPORT", "SHOPPING", "TRAVEL", "STUDY_MATERIALS"]
+
+    exchange_profile = getattr(user, "exchange_profile", None)
+    if not exchange_profile:
+        return Decimal("0"), Decimal("0")
+
+    exchange_country = exchange_profile.exchange_country
+    target_currency = COUNTRY_TO_CURRENCY.get(exchange_country, "KRW")
+
+    # LedgerEntry 지출 합산 (원화 기준)
+    entries = LedgerEntry.objects.filter(user=user, entry_type="EXPENSE", category__in=living_categories)
+
+    total_krw = Decimal("0")
+    for entry in entries:
+        total_krw += convert_to_krw(entry.amount, entry.currency_code)
+
+    # 예산안 기본파견비용 추가
+    base_budget = BaseBudget.objects.filter(user=user).order_by("-created_at").first()
+    if base_budget and base_budget.base_dispatch_amount_krw:
+        total_krw += base_budget.base_dispatch_amount_krw
+
+    # 교환국 화폐 기준으로 변환
+    total_foreign = convert_from_krw(total_krw, target_currency)
+    return total_foreign, total_krw
+
+
+# 가계부 등록합산만 (예산안 제외)
+def get_total_ledger_expense(user):
+    living_categories = ["FOOD", "HOUSING", "TRANSPORT", "SHOPPING", "TRAVEL", "STUDY_MATERIALS"]
+
+    exchange_profile = getattr(user, "exchange_profile", None)
+    if not exchange_profile:
+        return Decimal("0"), Decimal("0")
+
+    exchange_country = exchange_profile.exchange_country
+    target_currency = COUNTRY_TO_CURRENCY.get(exchange_country, "KRW")
+
+    # LedgerEntry 지출 합산 (원화 기준)
+    entries = LedgerEntry.objects.filter(user=user, entry_type="EXPENSE", category__in=living_categories)
+
+    total_krw = Decimal("0")
+    for entry in entries:
+        total_krw += convert_to_krw(entry.amount, entry.currency_code)
+
+    total_foreign = convert_from_krw(total_krw, target_currency)
+    return total_foreign, total_krw
+
+
+def get_months(exchange_period: str) -> int:
+    match = re.search(r"(\d+)", exchange_period or "")
+    return int(match.group(1)) if match else 1
+
+
+def safe_divide(amount: Decimal, months: int) -> Decimal:
+    if not months or months == 0:
+        return Decimal("0")
+    return (amount / Decimal(months)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
 def ok(message, data=None, status=status.HTTP_200_OK):
@@ -87,11 +150,15 @@ class FeedListView(APIView):
 
         for feed_data, snapshot in zip(data, feeds):
             user = snapshot.user
-            months = self._get_months(snapshot.snapshot_exchange_period)
+            months = get_months(snapshot.snapshot_exchange_period)
 
-            total_foreign, total_krw = self._get_total_expense(user)
-            avg_foreign = self._safe_divide(total_foreign, months)
-            avg_krw = self._safe_divide(total_krw, months)
+            # 총 파견비용 = Ledger + BaseBudget
+            total_foreign, total_krw = get_total_expense_with_budget(user)
+
+            # 평균 생활비 = Ledger만 (BaseBudget 제외)
+            ledger_foreign, ledger_krw = get_total_ledger_expense(user)
+            avg_foreign = safe_divide(ledger_foreign, months)
+            avg_krw = safe_divide(ledger_krw, months)
 
             feed_data["base_dispatch_foreign_amount"] = str(total_foreign.quantize(Decimal("0.01")))
             feed_data["base_dispatch_krw_amount"] = str(total_krw.quantize(Decimal("0.01")))
@@ -99,42 +166,6 @@ class FeedListView(APIView):
             feed_data["living_expense_krw_amount"] = str(avg_krw.quantize(Decimal("0.01")))
 
         return ok("가계부 요약본 목록 조회 성공", data)
-
-    def _get_months(self, exchange_period: str) -> int:
-        import re
-        match = re.search(r"(\d+)", exchange_period or "")
-        return int(match.group(1)) if match else 1
-    
-    def _get_total_expense(self, user):
-        living_categories = [
-            "FOOD", "HOUSING", "TRANSPORT", "SHOPPING", "TRAVEL", "STUDY_MATERIALS"
-        ]
-
-        exchange_profile = getattr(user, "exchange_profile", None)
-        if not exchange_profile:
-            return Decimal("0"), Decimal("0")
-
-        # 교환국 기준 통화코드 추출
-        exchange_country = exchange_profile.exchange_country
-        target_currency = COUNTRY_TO_CURRENCY.get(exchange_country, "KRW")
-
-        entries = LedgerEntry.objects.filter(
-            user=user,
-            entry_type="EXPENSE",
-            category__in=living_categories,
-        )
-
-        total_krw = Decimal("0")
-        for entry in entries:
-            total_krw += convert_to_krw(entry.amount, entry.currency_code)
-
-        total_foreign = convert_from_krw(total_krw, target_currency)
-        return total_foreign, total_krw
-
-    def _safe_divide(self, amount: Decimal, months: int) -> Decimal:
-        if not months or months == 0:
-            return Decimal("0")
-        return (amount / Decimal(months)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
 class FeedDetailView(APIView):
@@ -159,10 +190,15 @@ class FeedDetailView(APIView):
         data = serializer.data
 
         user = feed.user
-        months = self._get_months(feed.snapshot_exchange_period)
-        total_foreign, total_krw = self._get_total_expense(user)
-        avg_foreign = self._safe_divide(total_foreign, months)
-        avg_krw = self._safe_divide(total_krw, months)
+        months = get_months(feed.snapshot_exchange_period)
+            
+        # 총 파견비용 = Ledger + BaseBudget
+        total_foreign, total_krw = get_total_expense_with_budget(user)
+
+        # 평균 생활비 = Ledger만 (BaseBudget 제외)
+        ledger_foreign, ledger_krw = get_total_ledger_expense(user)
+        avg_foreign = safe_divide(ledger_foreign, months)
+        avg_krw = safe_divide(ledger_krw, months)
 
         data["base_dispatch_foreign_amount"] = str(total_foreign.quantize(Decimal("0.01")))
         data["base_dispatch_krw_amount"] = str(total_krw.quantize(Decimal("0.01")))
@@ -175,42 +211,6 @@ class FeedDetailView(APIView):
         data["scrapped"] = user_scrapped
 
         return ok("가계부 요약본 상세 조회 성공", data)
-
-    def _get_months(self, exchange_period: str) -> int:
-        import re
-        match = re.search(r"(\d+)", exchange_period or "")
-        return int(match.group(1)) if match else 1
-
-    def _get_total_expense(self, user):
-        living_categories = [
-            "FOOD", "HOUSING", "TRANSPORT", "SHOPPING", "TRAVEL", "STUDY_MATERIALS"
-        ]
-
-        exchange_profile = getattr(user, "exchange_profile", None)
-        if not exchange_profile:
-            return Decimal("0"), Decimal("0")
-
-        # 교환국 기준 통화코드 추출
-        exchange_country = exchange_profile.exchange_country
-        target_currency = COUNTRY_TO_CURRENCY.get(exchange_country, "KRW")
-
-        entries = LedgerEntry.objects.filter(
-            user=user,
-            entry_type="EXPENSE",
-            category__in=living_categories,
-        )
-
-        total_krw = Decimal("0")
-        for entry in entries:
-            total_krw += convert_to_krw(entry.amount, entry.currency_code)
-
-        total_foreign = convert_from_krw(total_krw, target_currency)
-        return total_foreign, total_krw
-
-    def _safe_divide(self, amount: Decimal, months: int) -> Decimal:
-        if not months or months == 0:
-            return Decimal("0")
-        return (amount / Decimal(months)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
 class FeedFavoriteView(APIView):
@@ -279,11 +279,15 @@ class MyScrapListView(APIView):
 
         for feed_data, snapshot in zip(data, snapshots):
             user = snapshot.user
-            months = self._get_months(snapshot.snapshot_exchange_period)
+            months = get_months(snapshot.snapshot_exchange_period)
 
-            total_foreign, total_krw = self._get_total_expense(user)
-            avg_foreign = self._safe_divide(total_foreign, months)
-            avg_krw = self._safe_divide(total_krw, months)
+            # 총 파견비용 = Ledger + BaseBudget
+            total_foreign, total_krw = get_total_expense_with_budget(user)
+
+            # 평균 생활비 = Ledger만 (BaseBudget 제외)
+            ledger_foreign, ledger_krw = get_total_ledger_expense(user)
+            avg_foreign = safe_divide(ledger_foreign, months)
+            avg_krw = safe_divide(ledger_krw, months)
 
             feed_data["base_dispatch_foreign_amount"] = str(total_foreign.quantize(Decimal("0.01")))
             feed_data["base_dispatch_krw_amount"] = str(total_krw.quantize(Decimal("0.01")))
@@ -291,42 +295,6 @@ class MyScrapListView(APIView):
             feed_data["living_expense_krw_amount"] = str(avg_krw.quantize(Decimal("0.01")))
 
         return ok("내 스크랩 목록 조회 성공", data)
-
-    def _get_months(self, exchange_period: str) -> int:
-        import re
-        match = re.search(r"(\d+)", exchange_period or "")
-        return int(match.group(1)) if match else 1
-
-    def _get_total_expense(self, user):
-        living_categories = [
-            "FOOD", "HOUSING", "TRANSPORT", "SHOPPING", "TRAVEL", "STUDY_MATERIALS"
-        ]
-
-        exchange_profile = getattr(user, "exchange_profile", None)
-        if not exchange_profile:
-            return Decimal("0"), Decimal("0")
-
-        # 교환국 기준 통화코드 추출
-        exchange_country = exchange_profile.exchange_country
-        target_currency = COUNTRY_TO_CURRENCY.get(exchange_country, "KRW")
-
-        entries = LedgerEntry.objects.filter(
-            user=user,
-            entry_type="EXPENSE",
-            category__in=living_categories,
-        )
-
-        total_krw = Decimal("0")
-        for entry in entries:
-            total_krw += convert_to_krw(entry.amount, entry.currency_code)
-
-        total_foreign = convert_from_krw(total_krw, target_currency)
-        return total_foreign, total_krw
-
-    def _safe_divide(self, amount: Decimal, months: int) -> Decimal:
-        if not months or months == 0:
-            return Decimal("0")
-        return (amount / Decimal(months)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
 class MyFeedStatsView(APIView):
