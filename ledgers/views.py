@@ -10,6 +10,8 @@ from rates.views import convert_to_krw, convert_from_krw
 
 from .serializers import *
 from .models import *
+from budgets.models import Budget, LivingBudget
+from decimal import Decimal
 
 # 생활비용 (용돈, 기타는 제외)
 LIVING_CATEGORIES = {
@@ -160,6 +162,39 @@ class MyLedgerAllCategoryView(APIView):
         living_krw_total = living_krw_total.quantize(Decimal("0.01"))
         living_foreign_total = living_foreign_total.quantize(Decimal("0.01"))
 
+        budget_krw = None
+        budget_foreign = None
+        diff_krw = None
+        diff_foreign = None
+        diff_sign = None
+
+        try:
+            budget = Budget.objects.filter(user=user).first()
+            if budget and hasattr(budget, "living_budget"):
+                living_budget = budget.living_budget # 예산안 연동
+                budget_krw = Decimal(str(living_budget.total_amount)) # 한화 기준 예산
+                budget_foreign = convert_from_krw(budget_krw, foreign_currency) # 교환국 기준 화폐로 변경
+
+                # 예산 대비
+                diff_krw = living_krw_total - budget_krw
+                diff_foreign = living_foreign_total - budget_foreign
+
+                # 예산안보다 더 쓰면 +, 덜 쓰면 -
+                diff_sign = "+" if diff_krw > 0 else "-"
+            else:
+                budget_krw = Decimal("0.00")
+                budget_foreign = Decimal("0.00")
+                diff_krw = Decimal("0.00")
+                diff_foreign = Decimal("0.00")
+                diff_sign = "-"
+        except Exception:
+            budget_krw = Decimal("0.00")
+            budget_foreign = Decimal("0.00")
+            diff_krw = Decimal("0.00")
+            diff_foreign = Decimal("0.00")
+            diff_sign = "-"
+
+        # 카테고리 리스트
         label_map = self._category_label_map()
         existing_codes = [code for code, _ in LedgerEntry.Category.choices]
 
@@ -198,10 +233,11 @@ class MyLedgerAllCategoryView(APIView):
                     "krw_currency": "KRW",
                 },
                 "living_expense_budget_diff": {
-                    "foreign_amount": None,
+                    "foreign_amount": diff_foreign.quantize(Decimal("0.01")),
                     "foreign_currency": foreign_currency,
-                    "krw_amount": None,
+                    "krw_amount": diff_krw.quantize(Decimal("0.01")),
                     "krw_currency": "KRW",
+                    "sign": diff_sign,  # +면 더 쓴 거, -면 덜 쓴 거. 예산안 대비.
                 },
                 "categories": categories_payload,
                 "base_dispatch_cost": {
