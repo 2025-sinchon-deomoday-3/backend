@@ -325,46 +325,46 @@ class LedgerSummaryView(APIView):
         return result, total_foreign, total_krw, total_current_krw
 
     def _build_dispatch_cost(self, user, foreign_currency):
-        base_budget = BaseBudget.objects.filter(user=user).first()
+        base_budget = BaseBudget.objects.filter(budget__user=user).first()
         if not base_budget:
             return self._empty_dispatch_cost(foreign_currency)
 
         dispatch_items = {
-            "flight": {
-                "foreign_amount": getattr(base_budget, "flight_foreign_amount", None),
-                "foreign_currency": foreign_currency,
-                "krw_amount": getattr(base_budget, "flight_krw_amount", None),
-                "krw_currency": "KRW",
-            },
-            "insurance": {
-                "foreign_amount": getattr(base_budget, "insurance_foreign_amount", None),
-                "foreign_currency": foreign_currency,
-                "krw_amount": getattr(base_budget, "insurance_krw_amount", None),
-                "krw_currency": "KRW",
-            },
-            "visa": {
-                "foreign_amount": getattr(base_budget, "visa_foreign_amount", None),
-                "foreign_currency": foreign_currency,
-                "krw_amount": getattr(base_budget, "visa_krw_amount", None),
-                "krw_currency": "KRW",
-            },
-            "tuition": {
-                "foreign_amount": getattr(base_budget, "tuition_foreign_amount", None),
-                "foreign_currency": foreign_currency,
-                "krw_amount": getattr(base_budget, "tuition_krw_amount", None),
-                "krw_currency": "KRW",
-            },
+            "flight": self._empty_dispatch_cost_item(foreign_currency),
+            "insurance": self._empty_dispatch_cost_item(foreign_currency),
+            "visa": self._empty_dispatch_cost_item(foreign_currency),
+            "tuition": self._empty_dispatch_cost_item(foreign_currency),
         }
 
-        for key, item in dispatch_items.items():
-            if item["foreign_amount"] is None:
-                item["current_rate_krw_amount"] = None
+        for item in base_budget.items.all():
+            key = item.type.lower()
+            if key not in dispatch_items:
                 continue
-            item["current_rate_krw_amount"] = convert_to_krw(
-                item["foreign_amount"],
-                item["foreign_currency"],
-            )
 
+            krw_amount = item.exchange_amount or item.amount
+            krw_currency = "KRW"
+
+            if item.currency == foreign_currency:
+                foreign_amount = item.amount
+            else:
+                foreign_amount = convert_from_krw(krw_amount, foreign_currency)
+            if foreign_amount is None:
+                foreign_amount = Decimal("0.00")
+
+            # 현재 환율 기준
+            current_rate_krw_amount = convert_to_krw(foreign_amount, foreign_currency)
+
+            dispatch_items[key] = {
+                "foreign_amount": foreign_amount.quantize(Decimal("0.01")),
+                "foreign_currency": foreign_currency,
+                "krw_amount": krw_amount.quantize(Decimal("0.01")),
+                "krw_currency": krw_currency,
+                "current_rate_krw_amount": current_rate_krw_amount.quantize(Decimal("0.01"))
+                if current_rate_krw_amount
+                else None,
+            }
+
+        # 총합 계산
         total_foreign = sum(
             (item["foreign_amount"] or Decimal("0")) for item in dispatch_items.values()
         )
@@ -384,3 +384,27 @@ class LedgerSummaryView(APIView):
         }
 
         return dispatch_items
+
+    def _empty_dispatch_cost_item(self, foreign_currency):
+        return {
+            "foreign_amount": None,
+            "foreign_currency": foreign_currency,
+            "krw_amount": None,
+            "krw_currency": "KRW",
+            "current_rate_krw_amount": None,
+        }
+
+    def _empty_dispatch_cost(self, foreign_currency):
+        return {
+            "flight": self._empty_dispatch_cost_item(foreign_currency),
+            "insurance": self._empty_dispatch_cost_item(foreign_currency),
+            "visa": self._empty_dispatch_cost_item(foreign_currency),
+            "tuition": self._empty_dispatch_cost_item(foreign_currency),
+            "total": {
+                "foreign_amount": Decimal("0.00"),
+                "foreign_currency": foreign_currency,
+                "krw_amount": Decimal("0.00"),
+                "krw_currency": "KRW",
+                "current_rate_krw_amount": Decimal("0.00"),
+            },
+        }
