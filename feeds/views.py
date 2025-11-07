@@ -12,7 +12,7 @@ from .serializers import *
 from summaries.models import SummarySnapshot
 from ledgers.models import LedgerEntry
 from rates.views import convert_to_krw, convert_from_krw
-from budgets.models import BaseBudget
+from budgets.models import BaseBudget, Budget, BaseBudgetItem
 import re
 
 
@@ -50,9 +50,12 @@ def get_total_expense_with_budget(user):
         total_krw += convert_to_krw(entry.amount, entry.currency_code)
 
     # 예산안 기본파견비용 추가
-    base_budget = BaseBudget.objects.filter(user=user).order_by("-created_at").first()
-    if base_budget and base_budget.base_dispatch_amount_krw:
-        total_krw += base_budget.base_dispatch_amount_krw
+    budget = Budget.objects.filter(user=user).first()
+    if budget and hasattr(budget, "base_budget"):
+        base_budget = budget.base_budget
+        if base_budget.items.exists():
+            for item in base_budget.items.all():
+                total_krw += item.get_krw_amount()
 
     # 교환국 화폐 기준으로 변환
     total_foreign = convert_from_krw(total_krw, target_currency)
@@ -206,25 +209,34 @@ class FeedDetailView(APIView):
         avg_krw = safe_divide(ledger_krw, months)
 
         # LedgerEntry 지출합
-        entries = LedgerEntry.objects.filter(
-            user=user, entry_type="EXPENSE", category__in=living_categories
-        )
+        entries = LedgerEntry.objects.filter(user=user, entry_type="EXPENSE", category__in=living_categories)
 
-        living_expense_categories = []
+        category_totals_krw = {}
         for entry in entries:
             krw_amount = convert_to_krw(entry.amount, entry.currency_code)
-            current_krw_amount = convert_to_krw(entry.amount, entry.currency_code, latest=True)
+            category_totals_krw.setdefault(entry.category, Decimal("0"))
+            category_totals_krw[entry.category] += krw_amount
+
+        living_expense_categories = []
+        total_krw = Decimal("0")
+
+        for code, krw_amount in category_totals_krw.items():
+            label = LedgerEntry.Category(code).label
             foreign_amount = convert_from_krw(krw_amount, target_currency)
 
+            current_krw_amount = convert_to_krw(foreign_amount, target_currency)
+
             living_expense_categories.append({
-                "code": entry.category,
-                "label": LedgerEntry.Category(entry.category).label,
+                "code": code,
+                "label": label,
                 "foreign_amount": str(foreign_amount.quantize(Decimal("0.01"))),
                 "foreign_currency": target_currency,
-                "krw_amount": str(krw_amount.quantize(Decimal("0.01"))),
+                "krw_amount": str(krw_amount.quantize(Decimal("0.01"))),  # 과거 환율 기준 (등록 당시)
                 "krw_currency": "KRW",
-                "current_rate_krw_amount": str(current_krw_amount.quantize(Decimal("0.01")))
+                "current_rate_krw_amount": str(current_krw_amount.quantize(Decimal("0.01"))) # 현재 환율 기준
             })
+
+            total_krw += krw_amount
 
         living_expense_summary = {
             "foreign_amount": str(avg_foreign.quantize(Decimal("0.01"))),
@@ -235,7 +247,8 @@ class FeedDetailView(APIView):
         }
 
         # 기본파견비용
-        base_budget = BaseBudget.objects.filter(user=user).order_by("-created_at").first()
+        budget = Budget.objects.filter(user=user).first()
+        base_budget = getattr(budget, "base_budget", None)
         base_dispatch_summary = {
             "foreign_amount": "0",
             "foreign_currency": target_currency,
@@ -245,25 +258,17 @@ class FeedDetailView(APIView):
         }
 
         if base_budget:
-            fields = [
-                ("flight_cost_krw", "항공권"),
-                ("insurance_cost_krw", "보험료"),
-                ("visa_cost_krw", "비자"),
-                ("tuition_cost_krw", "등록금"),
-            ]
-            total_krw = Decimal("0")
+            total_krw = sum(item.get_krw_amount() for item in base_budget.items.all())
             categories = []
 
-            for field, label in fields:
-                cost_krw = getattr(base_budget, field, None)
-                if not cost_krw:
-                    continue
-
+            for item in base_budget.items.all():
+                label = BaseBudgetItem.BaseItem(item.type).label
+                cost_krw = item.get_krw_amount()
                 cost_foreign = convert_from_krw(cost_krw, target_currency)
-                current_krw = convert_to_krw(cost_foreign, target_currency, latest=True)
+                current_krw = convert_to_krw(cost_foreign, target_currency)
 
                 categories.append({
-                    "code": field.upper().replace("_KRW", ""),
+                    "code": item.type,
                     "label": label,
                     "foreign_amount": str(cost_foreign.quantize(Decimal("0.01"))),
                     "foreign_currency": target_currency,
@@ -271,7 +276,6 @@ class FeedDetailView(APIView):
                     "krw_currency": "KRW",
                     "current_rate_krw_amount": str(current_krw.quantize(Decimal("0.01"))),
                 })
-                total_krw += cost_krw
 
             base_dispatch_summary = {
                 "foreign_amount": str(convert_from_krw(total_krw, target_currency).quantize(Decimal("0.01"))),
