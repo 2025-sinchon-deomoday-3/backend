@@ -8,10 +8,6 @@ class BaseBudgetItemSerializer(serializers.ModelSerializer):
         model = BaseBudgetItem
         fields = ["id", "type", "amount", "currency", "exchange_amount", "created_at", "updated_at"]
 
-    #exchange_budget 출력
-    # def create(self, validated_data):
-        
-
 
 #기본 파견비 시리얼라이저(*Nested Serializer)
 class BaseBudgetSerializer(serializers.ModelSerializer):
@@ -80,8 +76,18 @@ class BaseBudgetSerializer(serializers.ModelSerializer):
 class LivingBudgetItemSerializer(serializers.ModelSerializer):
     class Meta:
         model = LivingBudgetItem
-        fields = ["id", "type", "amount", "created_at", "updated_at"]
+        fields = ["id", "type", "custom_name", "amount", "created_at", "updated_at"]
 
+    def get_display_name(self, obj):
+        return obj.get_display_name()
+    
+    #사용자 정의 항목이면 ETC로 설정
+    def validate(self, data):
+        custom_name = data.get("custom_name")
+        if custom_name:
+            data["type"] = "ETC"
+        return data
+        
 
 #생활비 시리얼라이저(*Nested Serializer)
 class LivingBudgetSerializer(serializers.ModelSerializer):
@@ -92,13 +98,6 @@ class LivingBudgetSerializer(serializers.ModelSerializer):
         fields = ["id", "total_amount", "items", "created_at", "updated_at"]
 
     def create(self, validated_data):
-        # items_data = validated_data.pop("items", [])
-        # living_budget = LivingBudget.objects.create(**validated_data)
-
-        # for item_data in items_data:
-        #     LivingBudgetItem.objects.create(living_budget=living_budget, **item_data)
-
-        # return living_budget
         base_budget_data = validated_data.pop("base_budget", None)
         living_budget_data = validated_data.pop("living_budget", None)
 
@@ -117,36 +116,32 @@ class LivingBudgetSerializer(serializers.ModelSerializer):
             items_data = living_budget_data.pop("items", [])
             living_budget = LivingBudget.objects.create(budget=budget, **living_budget_data)
             for item_data in items_data:
+                custom_name = item_data.get("custom_name")
+                #사용자 입력 항목이면 ETC로 강제
+                if custom_name:
+                    item_data["type"] = "ETC"
                 LivingBudgetItem.objects.create(living_budget=living_budget, **item_data)
 
         return budget
 
         
     def update(self, instance, validated_data):
-        items_data = validated_data.pop("items")
+        items_data = validated_data.pop("items", [])
 
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
         instance.save()
 
-        # if items_data is not None:
-        #     for item_data in items_data:
-        #         item_type = item_data.get("type")
-        #         amount = item_data.get("amount")
-
-        #         item_obj = instance.items.filter(type=item_type).first()
-        #         if item_obj:
-        #             item_obj.amount = amount
-        #             item_obj.save()
-        #         else:
-        #             LivingBudgetItem.objects.create(living_budget=instance, **item_data)
-
         for item_data in items_data:
             item_type = item_data.get("type")
-            amount = item_data.get("amount")
+            custom_name = item_data.get("custom_name")
+
+            #사용자 정의 항목이면 ETC로 강제
+            if custom_name:
+                item_type = "ETC"
 
             # 기존 항목 조회
-            item_obj = instance.items.filter(type=item_type).first()
+            item_obj = instance.items.filter(type=item_type, custom_name=custom_name).first()
 
             if item_obj:
                 # 기존 항목 수정
@@ -155,7 +150,12 @@ class LivingBudgetSerializer(serializers.ModelSerializer):
                 item_obj.save()
             else:
                 # 새 항목 생성 (amount 포함 후에 저장)
-                LivingBudgetItem.objects.create(living_budget=instance, **item_data)
+                LivingBudgetItem.objects.create(
+                    living_budget=instance,
+                    type=item_type,
+                    custom_name=custom_name,
+                    amount=item_data.get("amount", 0)
+                )
 
         return instance
 
