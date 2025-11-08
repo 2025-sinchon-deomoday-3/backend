@@ -162,14 +162,19 @@ class LivingBudgetSerializer(serializers.ModelSerializer):
             
 #예산안 시리얼라이저(*Nested Serializer)
 class BudgetSerializer(serializers.ModelSerializer):
+    total_budget_value = serializers.SerializerMethodField()
     #수정해야 함 
     base_budget = BaseBudgetSerializer(required=False)
     living_budget = LivingBudgetSerializer(required=False)
 
     class Meta:
         model = Budget
-        fields = ["id", "user", "base_budget", "living_budget", "created_at", "updated_at"]
-
+        fields = ["id", "user", "total_budget_value", "base_budget", "living_budget", "created_at", "updated_at"]
+    
+    def get_total_budget_value(self, obj):
+        total = obj.get_total_budget()
+        obj.refresh_from_db(fields=["total_budget"])
+        return obj.total_budget
     
     def create(self, validated_data):
         base_budget_data = validated_data.pop("base_budget", None)

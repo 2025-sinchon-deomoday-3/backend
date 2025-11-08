@@ -1,15 +1,11 @@
 from django.db import models
 from django.conf import settings
 from rates.utils import convert_to_krw
+from accounts.models import ExchangeProfile
+from decimal import Decimal
+import re
 
 # Create your models here.
-#예산안
-class Budget(models.Model):
-    #사용자<->예산안 1:1 
-    user = models.OneToOneField(settings.AUTH_USER_MODEL, null=True,
-                             on_delete=models.SET_NULL, related_name="budget")
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
 
 #통화 옵션
 class CurrencyOption(models.TextChoices):
@@ -24,7 +20,7 @@ class CurrencyOption(models.TextChoices):
 
 #예산안 내 기본 파견비
 class BaseBudget(models.Model):
-    budget = models.OneToOneField(Budget, on_delete=models.CASCADE, related_name="base_budget")
+    budget = models.OneToOneField("Budget", on_delete=models.CASCADE, related_name="base_budget")
     total_amount_krw = models.DecimalField(max_digits=20, decimal_places=2, default=0)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -77,7 +73,7 @@ class BaseBudgetItem(models.Model):
     
 # 예산안 내 생활비 
 class LivingBudget(models.Model):
-    budget = models.OneToOneField(Budget, on_delete=models.CASCADE, related_name="living_budget")
+    budget = models.OneToOneField("Budget", on_delete=models.CASCADE, related_name="living_budget")
     total_amount = models.IntegerField(default=0) #한 달 생활비(필수 입력) 
     # total_amount_krw = models.DecimalField(max_digits=20, decimal_places=2, default=0) #선택 입력 값까지 합산  
     created_at = models.DateTimeField(auto_now_add=True)
@@ -116,8 +112,46 @@ class LivingBudgetItem(models.Model):
         return self.amount
 
     
+#예산안
+class Budget(models.Model):
+    #사용자<->예산안 1:1 
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, null=True,
+                             on_delete=models.SET_NULL, related_name="budget")
+    total_budget = models.DecimalField(max_digits=20, decimal_places=2, default=0) #파견 예상 총 금액
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
+    def get_total_budget(self):
+        """
+        총 예상 금액 산출:
+        (1) BaseBudget의 원화 총합
+        (2) LivingBudget의 월별 총합 * 파견개월 수
+        """
+        total = Decimal(0)
+
+        #기본 파견비 합산(KRW로 환산된 금액 가정)
+        if hasattr(self, "base_budget"):
+            total += self.base_budget.total_amount_krw or Decimal(0)
+
+        #한 달 생활비 * 파견 개월 수 
+        months = 0
+        exchange_profile = getattr(self.user, "exchange_profile", None)
+        if exchange_profile:
+            duration = getattr(exchange_profile, "exchange_period", "")
+            #string값에서 숫자 추출
+            match = re.search(r"\d+", duration)
+            if match:
+                months = int(match.group())
+            else:
+                months = 0
+        if hasattr(self, "living_budget"):
+            monthly_total = self.living_budget.total_amount or Decimal(0)
+            total += monthly_total*Decimal(months)
+
+
+        #총합 저장
+        self.total_budget = total
+        self.save(update_fields=["total_budget"])
+        return total
     
-
-
-
+      
