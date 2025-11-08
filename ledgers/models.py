@@ -19,6 +19,7 @@ class LedgerEntry(models.Model):
         TRAVEL = "TRAVEL", "여행비"
         STUDY_MATERIALS = "STUDY_MATERIALS", "교재비"
         ALLOWANCE = "ALLOWANCE", "용돈"
+        ETC = "ETC", "기타"
 
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="ledger_entries", null=True)
 

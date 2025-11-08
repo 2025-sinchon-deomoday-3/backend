@@ -10,4 +10,5 @@ urlpatterns = [
     path('ledgers/', include('ledgers.urls')),
     path('budgets/', include('budgets.urls')),
     path('summaries/', include('summaries.urls')),
+    path('feeds/', include('feeds.urls')),
 ] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

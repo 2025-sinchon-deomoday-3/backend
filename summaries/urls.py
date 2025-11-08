@@ -4,5 +4,6 @@ from .views import *
 app_name = 'summaries'
 
 urlpatterns = [
-    path("detail-profile/", DetailProfileView.as_view(), name="detail-profile"),
+    path("snapshot/", DetailProfileView.as_view(), name="detail-profile"),
+    path("ledger-summary/", LedgerSummaryView.as_view(), name="ledger-summary"),
 ]

@@ -6,9 +6,37 @@ from datetime import datetime, date as date_type
 from collections import defaultdict
 from datetime import date
 from django.db.models import QuerySet
+from rates.views import convert_to_krw, convert_from_krw
 
 from .serializers import *
 from .models import *
+from budgets.models import Budget, LivingBudget, BaseBudget, BaseBudgetItem
+from decimal import Decimal, InvalidOperation
+
+
+# 생활비용 (용돈, 기타는 제외)
+LIVING_CATEGORIES = {
+    "FOOD",
+    "HOUSING",
+    "TRANSPORT",
+    "SHOPPING",
+    "TRAVEL",
+    "STUDY_MATERIALS",
+}
+
+COUNTRY_TO_CURRENCY = {
+    "한국": "KRW",
+    "미국": "USD",
+    "일본": "JPY",
+    "독일": "EUR",
+    "프랑스": "EUR",
+    "중국": "CNY",
+    "대만": "TWD",
+    "캐나다": "CAD",
+    "이탈리아": "EUR",
+    "네덜란드": "EUR",
+    "영국": "GBP",
+}
 
 
 def ok(message, data=None, status=200):
@@ -17,6 +45,19 @@ def ok(message, data=None, status=200):
 
 def bad(message, error=None, status=400):
     return Response({"message": message, "error": error}, status=status)
+
+
+# Decimal 변환 함수
+def safe_decimal(value):
+    try:
+        if value in (None, "", "None"):
+            return Decimal("0.00")
+        val = Decimal(str(value))
+        if val.is_nan() or val.is_infinite():
+            return Decimal("0.00")
+        return val
+    except (InvalidOperation, TypeError, ValueError):
+        return Decimal("0.00")
 
 
 class LedgerEntryCreateView(APIView):
@@ -91,61 +132,181 @@ class MyLedgerAllCategoryView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        qs = (
+        user = request.user
+        today = date.today()
+        month_start = today.replace(day=1)
+
+        entries = (
             LedgerEntry.objects
-            .filter(user=request.user)
+            .filter(user=user, date__gte=month_start, date__lte=today)
             .order_by("-date", "-created_at")
         )
 
-        months = defaultdict(list)
-        for e in qs:
-            months[e.date.replace(day=1)].append(e)
+        foreign_currency = self._foreign_currency(user)
 
-        cat_order = self._category_order()
-        cat_label = self._category_label_map()
+        # 카테고리별 합계
+        category_totals = defaultdict(lambda: {"krw": Decimal("0.00"), "foreign": Decimal("0.00")})
+        living_krw_total = Decimal("0.00")
+        living_foreign_total = Decimal("0.00")
 
-        month_blocks = []
-        for month_key in sorted(months.keys(), reverse=True):
-            by_cat = defaultdict(list)
-            for e in months[month_key]:
-                by_cat[e.category].append(e)
+        for entry in entries:
+            krw_amount = self._to_krw(entry)
+            if krw_amount is None:
+                continue
+            foreign_amount = self._to_foreign(krw_amount, foreign_currency)
+            category_totals[entry.category]["krw"] += krw_amount
+            category_totals[entry.category]["foreign"] += foreign_amount
 
-            categories = []
-            for code in cat_order:
-                entries = by_cat.get(code, [])
-                items = LedgerEntrySimpleSerializer(entries, many=True).data
-                categories.append(
-                    {
-                        "code": code,
-                        "label": cat_label.get(code, code),
-                        "items": items,
-                    }
-                )
+            if entry.category in LIVING_CATEGORIES:
+                living_krw_total += krw_amount
+                living_foreign_total += foreign_amount
 
-            month_blocks.append(
-                {
-                    "month": month_key.strftime("%Y-%m"),
-                    "categories": categories,
+        living_krw_total = living_krw_total.quantize(Decimal("0.01"))
+        living_foreign_total = living_foreign_total.quantize(Decimal("0.01"))
+
+        # 예산(LivingBudget) 비교 (한화 기준으로만)
+        budget = Budget.objects.filter(user=user).first()
+        diff_krw = Decimal("0.00")
+        diff_foreign = Decimal("0.00")
+        diff_sign = "-"
+
+        if budget and hasattr(budget, "living_budget"):
+            living_budget = budget.living_budget
+            budget_krw = safe_decimal(living_budget.total_amount)
+
+            # 예산 - 실제
+            diff_krw = budget_krw - living_krw_total
+            diff_foreign = convert_from_krw(diff_krw, foreign_currency) if diff_krw != 0 else Decimal("0.00")
+            diff_sign = "+" if diff_krw > 0 else "-"
+
+        # 기본파견비
+        base_dispatch_payload = {
+            "airfare": {"foreign_amount": "0.00", "foreign_currency": foreign_currency, "krw_amount": "0.00", "krw_currency": "KRW"},
+            "insurance": {"foreign_amount": "0.00", "foreign_currency": foreign_currency, "krw_amount": "0.00", "krw_currency": "KRW"},
+            "visa": {"foreign_amount": "0.00", "foreign_currency": foreign_currency, "krw_amount": "0.00", "krw_currency": "KRW"},
+            "tuition": {"foreign_amount": "0.00", "foreign_currency": foreign_currency, "krw_amount": "0.00", "krw_currency": "KRW"},
+            "total": {"foreign_amount": "0.00", "foreign_currency": foreign_currency, "krw_amount": "0.00", "krw_currency": "KRW"},
+        }
+
+        if budget and hasattr(budget, "base_budget"):
+            base_budget = budget.base_budget
+            items = base_budget.items.all()
+            total_krw = Decimal("0.00")
+            total_foreign = Decimal("0.00")
+
+            for item in items:
+                krw_amount = safe_decimal(item.exchange_amount)
+                foreign_amount = safe_decimal(convert_from_krw(krw_amount, foreign_currency))
+                total_krw += krw_amount
+                total_foreign += foreign_amount
+
+                payload_item = {
+                    "foreign_amount": str(foreign_amount.quantize(Decimal("0.01"))),
+                    "foreign_currency": foreign_currency,
+                    "krw_amount": str(krw_amount.quantize(Decimal("0.01"))),
+                    "krw_currency": "KRW",
                 }
-            )
 
-        return ok("내 가계부 카테고리별 조회 성공", month_blocks)
+                if item.type == BaseBudgetItem.BaseItem.FLIGHT:
+                    base_dispatch_payload["airfare"] = payload_item
+                elif item.type == BaseBudgetItem.BaseItem.INSURANCE:
+                    base_dispatch_payload["insurance"] = payload_item
+                elif item.type == BaseBudgetItem.BaseItem.VISA:
+                    base_dispatch_payload["visa"] = payload_item
+                elif item.type == BaseBudgetItem.BaseItem.TUITION:
+                    base_dispatch_payload["tuition"] = payload_item
 
-    def _category_order(self):
-        order = [
-            "FOOD",
-            "HOUSING",
-            "TRANSPORT",
-            "SHOPPING",
-            "TRAVEL",
-            "STUDY_MATERIALS",
-            "ALLOWANCE",
-            "ETC",
-        ]
-        existing = {code for code, _ in LedgerEntry.Category.choices}
-        return [c for c in order if c in existing] + [
-            c for c in existing if c not in order
-        ]
+            base_dispatch_payload["total"] = {
+                "foreign_amount": str(total_foreign.quantize(Decimal("0.01"))),
+                "foreign_currency": foreign_currency,
+                "krw_amount": str(total_krw.quantize(Decimal("0.01"))),
+                "krw_currency": "KRW",
+            }
+
+        # 카테고리별 예산 비교
+        label_map = self._category_label_map()
+        existing_codes = [code for code, _ in LedgerEntry.Category.choices]
+
+        living_budget_items = {}
+        if budget and hasattr(budget, "living_budget"):
+            for item in budget.living_budget.items.all():
+                living_budget_items[item.type] = safe_decimal(item.amount)
+
+        categories_payload = []
+        for code in existing_codes:
+            if code == "ALLOWANCE":
+                continue
+            summed = category_totals.get(code, {"krw": Decimal("0.00"), "foreign": Decimal("0.00")})
+            actual_krw = summed["krw"]
+            actual_foreign = summed["foreign"]
+            budget_foreign_diff = None
+            sign = None
+
+            if code in living_budget_items:
+                budget_krw = living_budget_items[code]
+                diff_krw_cat = budget_krw - actual_krw
+                diff_foreign_cat = convert_from_krw(diff_krw_cat, foreign_currency)
+                sign = "+" if diff_krw_cat > 0 else "-"
+                budget_foreign_diff = diff_foreign_cat.quantize(Decimal("0.01"))
+
+            categories_payload.append({
+                "code": code,
+                "label": label_map.get(code, code),
+                "foreign_amount": actual_foreign,
+                "foreign_currency": foreign_currency,
+                "krw_amount": actual_krw,
+                "krw_currency": "KRW",
+                "budget_diff": {
+                    "foreign_amount": budget_foreign_diff,
+                    "foreign_currency": foreign_currency,
+                    "sign": sign,
+                },
+            })
+
+        #  응답
+        payload = {
+            "month": today.strftime("%Y-%m"),
+            "living_expense": {
+                "foreign_amount": living_foreign_total,
+                "foreign_currency": foreign_currency,
+                "krw_amount": living_krw_total,
+                "krw_currency": "KRW",
+            },
+            "living_expense_budget_diff": {
+                "foreign_amount": diff_foreign.quantize(Decimal("0.01")),
+                "foreign_currency": foreign_currency,
+                "krw_amount": diff_krw.quantize(Decimal("0.01")),
+                "krw_currency": "KRW",
+                "sign": diff_sign,
+            },
+            "categories": categories_payload,
+            "base_dispatch_cost": base_dispatch_payload,
+        }
+
+        serializer = MonthlyCategoryDashboardSerializer(payload)
+        return ok("내 가계부 카테고리별 합산 조회 성공", serializer.data)
+
+    def _to_krw(self, entry: LedgerEntry):
+        if entry.currency_code == "KRW":
+            return entry.amount
+        return convert_to_krw(entry.amount, entry.currency_code)
+
+    def _to_foreign(self, krw_amount: Decimal, foreign_currency: str):
+        if foreign_currency == "KRW":
+            return krw_amount
+        converted = convert_from_krw(krw_amount, foreign_currency)
+        if converted is None:
+            return Decimal("0.00")
+        return converted
+
+    def _foreign_currency(self, user):
+        exchange_profile = getattr(user, "exchange_profile", None)
+        if not exchange_profile:
+            return "KRW"
+        country_name = getattr(exchange_profile, "exchange_country", None)
+        if not country_name:
+            return "KRW"
+        return COUNTRY_TO_CURRENCY.get(country_name.strip(), "KRW")
 
     def _category_label_map(self):
         return {code: label for code, label in LedgerEntry.Category.choices}
@@ -226,7 +387,7 @@ class ThisMonthSummaryView(APIView):
         serializer = ThisMonthSummarySerializer(result)
         return ok("이번달 수입/지출 합계 조회 성공", serializer.data)
 
-    def _calculate_summary(self, user, entries, today):
+    def _calculate_summary(self, user, entries, today=None):
         foreign_currency = self._foreign_currency(user)
 
         def _sum(entry_type):
@@ -235,27 +396,21 @@ class ThisMonthSummaryView(APIView):
             total_krw = Decimal("0.00")
 
             for entry in qs:
-                if entry.currency_code == "KRW":
-                    total_krw += entry.amount
-                    converted = convert_from_krw(entry.amount, foreign_currency)
-                    if converted:
-                        total_foreign += converted
-                    continue
+                krw_amount = safe_decimal(
+                    entry.amount_converted if entry.amount_converted and entry.converted_currency_code == "KRW"
+                    else entry.amount if entry.currency_code == "KRW"
+                    else convert_to_krw(entry.amount, entry.currency_code)
+                )
 
-                if entry.currency_code == foreign_currency:
-                    total_foreign += entry.amount
-                    converted = convert_to_krw(entry.amount, foreign_currency)
-                    if converted:
-                        total_krw += converted
-                    continue
+                total_krw += krw_amount
 
-                krw = convert_to_krw(entry.amount, entry.currency_code)
-                if krw is None:
-                    continue
-                total_krw += krw
-                foreign = convert_from_krw(krw, foreign_currency)
-                if foreign:
-                    total_foreign += foreign
+                if foreign_currency == "KRW":
+                    total_foreign += krw_amount
+                else:
+                    if entry.amount_converted and entry.converted_currency_code == foreign_currency:
+                        total_foreign += safe_decimal(entry.amount_converted)
+                    else:
+                        total_foreign += safe_decimal(convert_from_krw(krw_amount, foreign_currency))
 
             total_foreign = total_foreign.quantize(Decimal("0.01"))
             total_krw = total_krw.quantize(Decimal("0.01"))
@@ -265,7 +420,7 @@ class ThisMonthSummaryView(APIView):
         expense_foreign, expense_krw = _sum(LedgerEntry.EntryType.EXPENSE)
 
         return {
-            "month": today.strftime("%Y-%m"),
+            "month": today.strftime("%Y-%m") if today else "전체 기간",
             "foreign_currency": foreign_currency,
             "income_foreign": income_foreign,
             "income_krw": income_krw,
@@ -292,12 +447,11 @@ class TotalSummaryView(APIView):
     def get(self, request):
         user = request.user
         entries = LedgerEntry.objects.filter(user=user)
-
         result = self._calculate_summary(user, entries)
         serializer = ThisMonthSummarySerializer(result)
         return ok("전체 수입/지출 합계 조회 성공", serializer.data)
 
-    def _calculate_summary(self, user, entries):
+    def _calculate_summary(self, user, entries, today=None):
         foreign_currency = self._foreign_currency(user)
 
         def _sum(entry_type):
@@ -306,27 +460,21 @@ class TotalSummaryView(APIView):
             total_krw = Decimal("0.00")
 
             for entry in qs:
-                if entry.currency_code == "KRW":
-                    total_krw += entry.amount
-                    converted = convert_from_krw(entry.amount, foreign_currency)
-                    if converted:
-                        total_foreign += converted
-                    continue
+                krw_amount = safe_decimal(
+                    entry.amount_converted if entry.amount_converted and entry.converted_currency_code == "KRW"
+                    else entry.amount if entry.currency_code == "KRW"
+                    else convert_to_krw(entry.amount, entry.currency_code)
+                )
 
-                if entry.currency_code == foreign_currency:
-                    total_foreign += entry.amount
-                    converted = convert_to_krw(entry.amount, foreign_currency)
-                    if converted:
-                        total_krw += converted
-                    continue
+                total_krw += krw_amount
 
-                krw = convert_to_krw(entry.amount, entry.currency_code)
-                if krw is None:
-                    continue
-                total_krw += krw
-                foreign = convert_from_krw(krw, foreign_currency)
-                if foreign:
-                    total_foreign += foreign
+                if foreign_currency == "KRW":
+                    total_foreign += krw_amount
+                else:
+                    if entry.amount_converted and entry.converted_currency_code == foreign_currency:
+                        total_foreign += safe_decimal(entry.amount_converted)
+                    else:
+                        total_foreign += safe_decimal(convert_from_krw(krw_amount, foreign_currency))
 
             total_foreign = total_foreign.quantize(Decimal("0.01"))
             total_krw = total_krw.quantize(Decimal("0.01"))
@@ -336,7 +484,7 @@ class TotalSummaryView(APIView):
         expense_foreign, expense_krw = _sum(LedgerEntry.EntryType.EXPENSE)
 
         return {
-            "month": "전체 기간",
+            "month": today.strftime("%Y-%m") if today else "전체 기간",
             "foreign_currency": foreign_currency,
             "income_foreign": income_foreign,
             "income_krw": income_krw,
